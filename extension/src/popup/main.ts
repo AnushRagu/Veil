@@ -1,0 +1,1 @@
+console.log("[PrivateSight] Extension loaded");

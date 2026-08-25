@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - HOST=0.0.0.0
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  extension-dev:
+    build:
+      context: ./extension
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./extension:/app
+      - /app/node_modules
+    environment:
+      - VITE_SERVER_URL=http://server:3001
+    depends_on:
+      - server
+    command: npm run dev
+
+  demo:
+    image: nginx:alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./demo:/usr/share/nginx/html:ro
+    depends_on:
+      - server
+
+networks:
+  default:
+    name: privatesight-network
