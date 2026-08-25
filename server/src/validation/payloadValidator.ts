@@ -3,9 +3,8 @@ import { z } from "zod";
 import {
   ClientPayloadSchema,
   validateClientPayload,
-  ClientPayload,
   MAX_PAYLOAD_SIZE,
-} from "@privatesight/shared";
+} from "@veil/shared";
 
 export const payloadSizeLimit = MAX_PAYLOAD_SIZE;
 

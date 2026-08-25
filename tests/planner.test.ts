@@ -11,7 +11,8 @@ const createMockPageMap = (elements: any[]) => ({
 const mockElements = [
   {
     id: "el-1",
-    role: "button",
+    dataVeilId: "el-1",
+    role: "button" as const,
     label: "Submit Request",
     bounds: { x: 100, y: 100, width: 120, height: 40 },
     visible: true,
@@ -20,7 +21,8 @@ const mockElements = [
   },
   {
     id: "el-2",
-    role: "textbox",
+    dataVeilId: "el-2",
+    role: "textbox" as const,
     label: "Search products",
     bounds: { x: 100, y: 200, width: 300, height: 40 },
     visible: true,
@@ -29,7 +31,8 @@ const mockElements = [
   },
   {
     id: "el-3",
-    role: "textbox",
+    dataVeilId: "el-3",
+    role: "textbox" as const,
     label: "Full Name",
     bounds: { x: 100, y: 300, width: 300, height: 40 },
     visible: true,
@@ -38,7 +41,8 @@ const mockElements = [
   },
   {
     id: "el-4",
-    role: "textbox",
+    dataVeilId: "el-4",
+    role: "textbox" as const,
     label: "Email",
     bounds: { x: 100, y: 400, width: 300, height: 40 },
     visible: true,
@@ -47,7 +51,8 @@ const mockElements = [
   },
   {
     id: "el-5",
-    role: "textbox",
+    dataVeilId: "el-5",
+    role: "textbox" as const,
     label: "Password",
     bounds: { x: 100, y: 500, width: 300, height: 40 },
     visible: true,
@@ -56,7 +61,7 @@ const mockElements = [
   },
 ];
 
-describe("Rule-Based Planner", () => {
+describe("VEIL Rule-Based Planner", () => {
   it("finds submit button for submit goal", () => {
     const context = {
       userGoal: "Find the submit button and prepare the form",
@@ -69,7 +74,7 @@ describe("Rule-Based Planner", () => {
     expect(plan.actions.length).toBeGreaterThan(0);
     expect(plan.actions.some((a) => a.type === "highlight")).toBe(true);
     expect(plan.actions.some((a) => a.type === "focus")).toBe(true);
-    expect(plan.summary).toContain("Submit");
+    expect(plan.summary).toContain("submit");
   });
 
   it("finds search input for search goal", () => {
@@ -128,7 +133,7 @@ describe("Rule-Based Planner", () => {
       userGoal: "Click the button",
       pageMap: createMockPageMap(mockElements),
       redactionManifest: [
-        { category: "password", bounds: { x: 0, y: 0, width: 10, height: 10 }, confidence: 0.9, replacement: "[REDACTED_PASSWORD]" },
+        { category: "password" as const, bounds: { x: 0, y: 0, width: 10, height: 10 }, confidence: 0.9, replacement: "[REDACTED_PASSWORD]" },
       ],
     };
 

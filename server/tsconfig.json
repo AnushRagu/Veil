@@ -7,7 +7,8 @@
     "rootDir": "src",
     "strictNullChecks": false,
     "noUncheckedIndexedAccess": false,
-    "noEmit": false
+    "noEmit": false,
+    "paths": {}
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

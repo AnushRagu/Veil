@@ -1,7 +1,7 @@
 {
-  "name": "PrivateSight",
+  "name": "VEIL",
   "version": "0.1.0",
-  "description": "Privacy-preserving browser vision agent",
+  "description": "Hardened privacy-preserving browser boundary agent",
   "manifest_version": 3,
   "permissions": [
     "activeTab",
@@ -22,12 +22,12 @@
       "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_idle",
-      "all_frames": false
+      "all_frames": true
     }
   ],
   "action": {
     "default_popup": "src/popup/index.html",
-    "default_title": "PrivateSight",
+    "default_title": "VEIL Privacy Boundary",
     "default_icon": {
       "16": "icon-16.svg",
       "32": "icon-32.svg",

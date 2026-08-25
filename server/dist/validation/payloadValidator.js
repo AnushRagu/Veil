@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { validateClientPayload, MAX_PAYLOAD_SIZE, } from "@privatesight/shared";
+import { validateClientPayload, MAX_PAYLOAD_SIZE, } from "@veil/shared";
 export const payloadSizeLimit = MAX_PAYLOAD_SIZE;
 export function validatePayload(req, res, next) {
     const contentLength = parseInt(req.get("content-length") || "0", 10);

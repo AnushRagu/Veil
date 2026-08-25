@@ -1,5 +1,5 @@
-import { VisionProvider, VisionDetection, createVisionProvider, ModelConfig } from "./visionProvider";
-import { Bounds, RedactionEntry } from "@privatesight/shared";
+import { VisionProvider, VisionDetection, createVisionProvider, ModelConfig, VisionInput } from "./visionProvider";
+import { Bounds, RedactionEntry } from "@veil/shared";
 import { applyRedactionToScreenshot } from "../redaction/redactionEngine";
 
 export interface VisionPipelineConfig {
@@ -34,7 +34,7 @@ export class VisionPipeline {
       await this.provider.initialize();
       this.initialized = true;
     } catch (error) {
-      console.error("[VisionPipeline] Failed to initialize, falling back to mock:", error);
+      console.error("[VEIL VisionPipeline] Failed to initialize, falling back to mock:", error);
       this.provider = createVisionProvider("mock");
       await this.provider.initialize();
       this.config.provider = "mock";
@@ -58,13 +58,13 @@ export class VisionPipeline {
         const results = await this.provider!.detect(canvas);
         detections.push(...results);
       } catch (error) {
-        console.error("[VisionPipeline] Detection failed:", error);
+        console.error("[VEIL VisionPipeline] Detection failed:", error);
       }
     }
 
     const filteredDetections = detections.filter((d) => {
       if (!this.config.enableFaceDetection && d.className === "face") return false;
-      if (!this.config.enableSensitiveRegionDetection && ["credit_card", "id_card", "screen"].includes(d.className)) return false;
+      if (!this.config.enableSensitiveRegionDetection && ["credit_card", "id_card", "screen", "credentials_form"].includes(d.className)) return false;
       return true;
     });
 
@@ -85,7 +85,7 @@ export class VisionPipeline {
     }
 
     const inferenceTimeMs = performance.now() - startTime;
-    const backend = this.config.provider === "mock" ? "mock" : this.provider!.name === "onnx" ? "webgpu" : "wasm";
+    const backend = this.config.provider === "mock" ? "mock" : this.provider!.name === "onnx" ? "wasm" : "webgpu";
 
     return {
       detections: filteredDetections,
@@ -96,14 +96,14 @@ export class VisionPipeline {
     };
   }
 
-  async detectOnly(canvas: HTMLCanvasElement): Promise<VisionDetection[]> {
+  async detectOnly(input: VisionInput): Promise<VisionDetection[]> {
     if (!this.provider || !this.initialized) {
       await this.initialize();
     }
     try {
-      return await this.provider!.detect(canvas);
+      return await this.provider!.detect(input);
     } catch (error) {
-      console.error("[VisionPipeline] Detection failed:", error);
+      console.error("[VEIL VisionPipeline] Detection failed:", error);
       return [];
     }
   }
@@ -114,7 +114,7 @@ export class VisionPipeline {
 
   getBackend(): "webgpu" | "wasm" | "mock" {
     if (this.config.provider === "mock") return "mock";
-    return this.provider?.name === "onnx" ? "webgpu" : "wasm";
+    return "wasm";
   }
 
   isReady(): boolean {

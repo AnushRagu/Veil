@@ -1,5 +1,5 @@
 {
-  "name": "privatesight",
+  "name": "veil",
   "version": "0.1.0",
   "private": true,
   "workspaces": [
@@ -14,16 +14,17 @@
     "build:server": "npm run build --workspace=server",
     "build:shared": "npm run build --workspace=shared",
     "build": "npm run build:shared && npm run build:extension && npm run build:server",
-    "test": "npm run test --workspaces",
+    "test": "vitest run",
     "lint": "npm run lint --workspaces",
     "demo": "npm run build:extension && npx serve extension/dist",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down"
   },
   "devDependencies": {
+    "@types/node": "^20.11.0",
+    "jsdom": "^30.0.1",
     "typescript": "^5.4.0",
-    "vitest": "^1.4.0",
-    "@types/node": "^20.11.0"
+    "vitest": "^1.4.0"
   },
   "engines": {
     "node": ">=20.0.0"

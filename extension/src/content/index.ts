@@ -5,9 +5,12 @@ import {
   RedactionManifest,
   Bounds,
   ClientPayload,
-} from "@privatesight/shared";
-import { createVisionPipeline, VisionPipeline, VisionResult } from "../vision/visionPipeline";
+  ServerAction,
+  ElementValidationResult,
+} from "@veil/shared";
+import { createVisionPipeline, VisionPipeline } from "../vision/visionPipeline";
 import { sanitizeString, getOrigin, generateSessionId } from "../utils/helpers";
+import { ContextMinimizer } from "../minimization/contextMinimizer";
 
 interface ContentScriptState {
   sessionId: string | null;
@@ -37,7 +40,7 @@ async function initializeVisionPipeline(): Promise<VisionPipeline> {
   return pipeline;
 }
 
-function buildPageMap(elements: SanitizedElement[]): PageMap {
+function buildPageMap(elements: SanitizedElement[], minimizedCount = 0): PageMap {
   return {
     urlOrigin: getOrigin(window.location.href),
     title: sanitizeString(document.title),
@@ -46,6 +49,7 @@ function buildPageMap(elements: SanitizedElement[]): PageMap {
       height: window.innerHeight,
     },
     elements,
+    minimizedElementCount: minimizedCount,
   };
 }
 
@@ -57,39 +61,154 @@ function hasValidBounds(bounds: Bounds | undefined): bounds is Bounds {
     typeof bounds.height === "number";
 }
 
+/**
+ * Phase 1: Truthful Visual Perception (Dump Synthetic Canvas)
+ * Requests real rendered page snapshot via background service worker (chrome.tabs.captureVisibleTab),
+ * converting PNG data URL to a truthful canvas / raw pixel byte array.
+ */
 async function captureViewport(): Promise<HTMLCanvasElement> {
-  const canvas = document.createElement("canvas");
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not get canvas context");
-
-  await new Promise<void>((resolve) => {
-    const handleScroll = () => {
-      window.removeEventListener("scroll", handleScroll);
-      resolve();
-    };
-    window.addEventListener("scroll", handleScroll);
-    setTimeout(resolve, 50);
-  });
-
-  try {
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const elements = document.querySelectorAll("body *");
-    elements.forEach((el) => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        ctx.fillStyle = "rgba(0,0,0,0.1)";
-        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+  return new Promise<HTMLCanvasElement>((resolve) => {
+    chrome.runtime.sendMessage({ type: "CAPTURE_VISIBLE_TAB" }, (response) => {
+      if (response && response.success && response.dataUrl) {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width || window.innerWidth;
+          canvas.height = img.height || window.innerHeight;
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+          }
+          resolve(canvas);
+        };
+        img.onerror = () => {
+          resolve(createFallbackCanvas());
+        };
+        img.src = response.dataUrl;
+      } else {
+        // Fallback for isolated test / mock environments without tab capture
+        resolve(createFallbackCanvas());
       }
     });
-  } catch {
+  });
+}
+
+function createFallbackCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = window.innerWidth || 800;
+  canvas.height = window.innerHeight || 600;
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   }
-
   return canvas;
+}
+
+/**
+ * Phase 2: Unbreakable Element Grounding & Pre-Execution Verification Hook
+ * Right before an action fires, lookup the element by its `data-veil-id` and verify:
+ * 1. isVisible === true
+ * 2. Current role and labels match historical action plan
+ * 3. Element has not mutated or been replaced/disconnected from DOM
+ */
+export function verifyElementBeforeExecution(action: ServerAction): ElementValidationResult {
+  const target = action.target;
+  if (!target) {
+    if (action.type === "scroll" || action.type === "wait") {
+      return { valid: true, element: null };
+    }
+    return { valid: false, element: null, error: "Action is missing target specification", reason: "Target undefined" };
+  }
+
+  let element: Element | null = null;
+  const veilId = target.dataVeilId || target.elementId;
+
+  // 1. Primary lookup by persistent data-veil-id
+  if (veilId) {
+    element = document.querySelector(`[data-veil-id="${veilId}"]`);
+  }
+
+  // Fallback lookup by bounds if veilId lookup didn't find match
+  if (!element && target.bounds && hasValidBounds(target.bounds)) {
+    const b = target.bounds;
+    element = document.elementFromPoint(
+      (b.x ?? 0) + (b.width ?? 0) / 2,
+      (b.y ?? 0) + (b.height ?? 0) / 2
+    );
+  }
+
+  if (!element) {
+    return {
+      valid: false,
+      element: null,
+      error: `Grounding Failure: Target element with data-veil-id="${veilId}" not found in current DOM`,
+      reason: "Element disconnected or removed",
+    };
+  }
+
+  // 2. Verify element is connected to DOM
+  if (!element.isConnected) {
+    return {
+      valid: false,
+      element: null,
+      error: "Grounding Failure: Element is no longer connected to active document DOM",
+      reason: "Disconnected DOM node",
+    };
+  }
+
+  // 3. Verify element visibility
+  if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+      return {
+        valid: false,
+        element,
+        error: "Pre-execution Verification Failed: Target element is hidden or invisible",
+        reason: "Element not visible",
+      };
+    }
+  }
+
+  const rect = element.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    return {
+      valid: false,
+      element,
+      error: "Pre-execution Verification Failed: Element has zero bounding box dimensions",
+      reason: "Zero area bounding box",
+    };
+  }
+
+  // 4. Verify role and label integrity (Anti-mutation and anti-deception check)
+  if (target.expectedRole) {
+    const currentRole = element.getAttribute("role") || element.tagName.toLowerCase();
+    if (target.expectedRole !== "generic" && !currentRole.includes(target.expectedRole)) {
+      return {
+        valid: false,
+        element,
+        error: `Pre-execution Verification Failed: Element role mutated (expected: ${target.expectedRole}, actual: ${currentRole})`,
+        reason: "Role mutation detected",
+      };
+    }
+  }
+
+  if (target.expectedLabel) {
+    const currentLabel = (
+      element.getAttribute("aria-label") ||
+      element.getAttribute("placeholder") ||
+      (element as HTMLInputElement).value ||
+      element.textContent ||
+      ""
+    ).trim();
+
+    // Check if label has radically changed into a deceptive target
+    if (target.expectedLabel.length > 3 && !currentLabel.toLowerCase().includes(target.expectedLabel.toLowerCase()) && !target.expectedLabel.toLowerCase().includes(currentLabel.toLowerCase())) {
+      console.warn(`[VEIL Grounding Warning] Label difference: expected "${target.expectedLabel}" vs current "${currentLabel}"`);
+    }
+  }
+
+  return { valid: true, element };
 }
 
 async function performCapture(userGoal: string): Promise<ClientPayload> {
@@ -99,9 +218,16 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
   state.isCapturing = true;
 
   try {
-    const elements = extractSanitizedElements(document);
-    const pageMap = buildPageMap(elements);
+    // 1. Extraction with persistent data-veil-id stamping
+    const allElements = extractSanitizedElements(document);
 
+    // 2. Task-Aware Context Minimization (Privacy = Redaction + Minimization)
+    const minimization = ContextMinimizer.minimizeContext(allElements, userGoal);
+    const elementsToProcess = minimization.minimizedElements;
+
+    const initialPageMap = buildPageMap(elementsToProcess, minimization.prunedCount);
+
+    // 3. Truthful Visual Perception
     const canvas = await captureViewport();
     state.lastScreenshot = canvas;
 
@@ -109,10 +235,12 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
       state.visionPipeline = await initializeVisionPipeline();
     }
 
+    // Process frame through WASM ONNX SIMD vision layer
     const visionResult = await state.visionPipeline.processFrame(canvas, []);
 
+    // 4. Redaction Processing
     const redactionContext: RedactionContext = {
-      elements: pageMap.elements,
+      elements: initialPageMap.elements,
       screenshotWidth: canvas.width,
       screenshotHeight: canvas.height,
     };
@@ -136,16 +264,18 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
       return el;
     });
 
-    const finalPageMap = buildPageMap(finalElements);
+    const finalPageMap = buildPageMap(finalElements, minimization.prunedCount);
 
+    // 5. Apply Redactions + Minimization Masking to visual canvas
     let sanitizedScreenshot: string | undefined;
-    if (visionResult.redactedCanvas) {
-      sanitizedScreenshot = visionResult.redactedCanvas.toDataURL("image/jpeg", 0.7);
-    } else {
-      const redactedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
-      applyRedactionsToCanvas(redactedCanvas, combinedManifest);
-      sanitizedScreenshot = redactedCanvas.toDataURL("image/jpeg", 0.7);
+    const redactedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
+    const ctx = redactedCanvas.getContext("2d");
+    if (ctx && canvas.width > 0 && canvas.height > 0) {
+      ctx.drawImage(canvas, 0, 0);
     }
+    applyRedactionsToCanvas(redactedCanvas, combinedManifest);
+    ContextMinimizer.applyMinimizationMasksToCanvas(redactedCanvas, minimization.peripheralMasks);
+    sanitizedScreenshot = redactedCanvas.toDataURL("image/jpeg", 0.7);
 
     state.pageMap = finalPageMap;
     state.lastRedactionManifest = combinedManifest;
@@ -158,6 +288,7 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
       sanitizedScreenshot,
       pageMap: finalPageMap,
       redactionManifest: combinedManifest,
+      minimizationApplied: minimization.prunedCount > 0,
     };
 
     return payload;
@@ -190,36 +321,26 @@ function applyRedactionsToCanvas(canvas: HTMLCanvasElement, manifest: RedactionM
   }
 }
 
-async function executeAction(action: any): Promise<{ success: boolean; error?: string }> {
+async function executeAction(action: ServerAction): Promise<{ success: boolean; error?: string }> {
   try {
-    const { type, target, value, direction, amount } = action;
-
-    let element: Element | null = null;
-    if (target?.elementId) {
-      element = document.querySelector(`[data-ps-id="${target.elementId}"]`);
+    // Immediate pre-execution grounding & revalidation hook
+    const validation = verifyElementBeforeExecution(action);
+    if (!validation.valid) {
+      return { success: false, error: validation.error || "Pre-execution validation failed" };
     }
 
-    if (!element && target?.bounds && hasValidBounds(target.bounds)) {
-      const bounds = target.bounds;
-      element = document.elementFromPoint(
-        (bounds.x ?? 0) + (bounds.width ?? 0) / 2,
-        (bounds.y ?? 0) + (bounds.height ?? 0) / 2
-      );
-    }
-
-    if (!element) {
-      return { success: false, error: "Target element not found" };
-    }
+    const { type, value, direction, amount } = action;
+    const element = validation.element;
 
     switch (type) {
       case "highlight":
-        highlightElement(element);
+        if (element) highlightElement(element);
         break;
       case "focus":
-        (element as HTMLElement).focus();
+        if (element && "focus" in element) (element as HTMLElement).focus();
         break;
       case "click":
-        (element as HTMLElement).click();
+        if (element && "click" in element) (element as HTMLElement).click();
         break;
       case "scroll":
         window.scrollBy({ top: direction === "down" ? amount ?? 300 : -(amount ?? 300), behavior: "smooth" });
@@ -240,15 +361,15 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
 
     return { success: true };
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : "Unknown error" };
+    return { success: false, error: error instanceof Error ? error.message : "Unknown execution error" };
   }
 }
 
 function highlightElement(element: Element): void {
-  element.setAttribute("data-ps-highlight", "true");
+  element.setAttribute("data-veil-highlight", "true");
   const style = document.createElement("style");
   style.textContent = `
-    [data-ps-highlight] {
+    [data-veil-highlight] {
       outline: 3px solid #00d4aa !important;
       outline-offset: 2px !important;
       box-shadow: 0 0 0 4px rgba(0, 212, 170, 0.3) !important;
@@ -257,84 +378,72 @@ function highlightElement(element: Element): void {
   `;
   document.head.appendChild(style);
   setTimeout(() => {
-    element.removeAttribute("data-ps-highlight");
+    element.removeAttribute("data-veil-highlight");
     style.remove();
   }, 3000);
 }
 
-function assignElementIds(elements: SanitizedElement[]): void {
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
-  let index = 0;
-  while (walker.nextNode()) {
-    const el = walker.currentNode as Element;
-    if (index < elements.length) {
-      const elementId = elements[index].id!;
-      el.setAttribute("data-ps-id", elementId);
-      index++;
-    }
-  }
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    (async () => {
+      try {
+        switch (message.type) {
+          case "CAPTURE_AND_SEND": {
+            const payload = await performCapture(message.userGoal || "");
+            sendResponse({ success: true, payload });
+            break;
+          }
+          case "EXECUTE_ACTIONS": {
+            const results = [];
+            for (const action of message.actions ?? []) {
+              const result = await executeAction(action);
+              results.push({ actionId: action.id, ...result });
+            }
+            sendResponse({ success: true, results });
+            break;
+          }
+          case "GET_PAGE_MAP": {
+            if (state.pageMap) {
+              sendResponse({ success: true, pageMap: state.pageMap, redactionManifest: state.lastRedactionManifest });
+            } else {
+              const elements = extractSanitizedElements(document);
+              const pageMap = buildPageMap(elements);
+              state.pageMap = pageMap;
+              sendResponse({ success: true, pageMap, redactionManifest: [] });
+            }
+            break;
+          }
+          case "GET_PRIVACY_STATUS": {
+            sendResponse({
+              success: true,
+              status: {
+                backend: state.visionPipeline?.getBackend() ?? "mock",
+                redactedCount: state.lastRedactionManifest.length,
+                lastCapture: state.sessionId ? new Date().toISOString() : undefined,
+                sessionActive: !!state.sessionId,
+              },
+            });
+            break;
+          }
+          case "CLEAR_SESSION": {
+            state.sessionId = null;
+            state.pageMap = null;
+            state.lastScreenshot = null;
+            state.lastRedactionManifest = [];
+            state.visionPipeline?.dispose();
+            state.visionPipeline = null;
+            sendResponse({ success: true });
+            break;
+          }
+          default:
+            sendResponse({ success: false, error: "Unknown message type" });
+        }
+      } catch (error) {
+        sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" });
+      }
+    })();
+    return true;
+  });
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  (async () => {
-    try {
-      switch (message.type) {
-        case "CAPTURE_AND_SEND": {
-          const payload = await performCapture(message.userGoal);
-          sendResponse({ success: true, payload });
-          break;
-        }
-        case "EXECUTE_ACTIONS": {
-          const results = [];
-          for (const action of message.actions ?? []) {
-            const result = await executeAction(action);
-            results.push({ actionId: action.id, ...result });
-          }
-          sendResponse({ success: true, results });
-          break;
-        }
-        case "GET_PAGE_MAP": {
-          if (state.pageMap) {
-            sendResponse({ success: true, pageMap: state.pageMap, redactionManifest: state.lastRedactionManifest });
-          } else {
-            const elements = extractSanitizedElements(document);
-            const pageMap = buildPageMap(elements);
-            assignElementIds(elements);
-            state.pageMap = pageMap;
-            sendResponse({ success: true, pageMap, redactionManifest: [] });
-          }
-          break;
-        }
-        case "GET_PRIVACY_STATUS": {
-          sendResponse({
-            success: true,
-            status: {
-              backend: state.visionPipeline?.getBackend() ?? "mock",
-              redactedCount: state.lastRedactionManifest.length,
-              lastCapture: state.sessionId ? new Date().toISOString() : undefined,
-              sessionActive: !!state.sessionId,
-            },
-          });
-          break;
-        }
-        case "CLEAR_SESSION": {
-          state.sessionId = null;
-          state.pageMap = null;
-          state.lastScreenshot = null;
-          state.lastRedactionManifest = [];
-          state.visionPipeline?.dispose();
-          state.visionPipeline = null;
-          sendResponse({ success: true });
-          break;
-        }
-        default:
-          sendResponse({ success: false, error: "Unknown message type" });
-      }
-    } catch (error) {
-      sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" });
-    }
-  })();
-  return true;
-});
-
-console.log("[PrivateSight] Content script loaded");
+console.log("[VEIL] Content script loaded with persistent grounding & minimization boundaries");

@@ -6,9 +6,9 @@ import {
   SENSITIVE_LABEL_KEYWORDS,
   EXPLICIT_SENSITIVE_ATTRS,
 } from "../extension/src/redaction/patterns";
-import { ClientPayloadSchema, ServerPlanSchema, validateClientPayload, validateServerPlan } from "../shared/src/schemas";
+import { ClientPayloadSchema, ServerPlanSchema, validateClientPayload, validateServerPlan } from "@veil/shared";
 
-describe("PII Detection", () => {
+describe("VEIL PII Detection", () => {
   describe("detectPIICategory", () => {
     it("detects email addresses", () => {
       const result = detectPIICategory("Contact me at user@example.com");
@@ -84,7 +84,7 @@ describe("PII Detection", () => {
   });
 });
 
-describe("Schema Validation", () => {
+describe("VEIL Schema Validation", () => {
   describe("ClientPayloadSchema", () => {
     it("validates a correct payload", () => {
       const payload = {
@@ -98,6 +98,7 @@ describe("Schema Validation", () => {
           elements: [
             {
               id: "el-1",
+              dataVeilId: "el-1",
               role: "button",
               label: "Submit",
               bounds: { x: 100, y: 100, width: 80, height: 40 },
@@ -182,7 +183,7 @@ describe("Schema Validation", () => {
   });
 });
 
-describe("Redaction Logic", () => {
+describe("Redaction Logic & Defensive Attributes", () => {
   it("has comprehensive sensitive label keywords", () => {
     expect(SENSITIVE_LABEL_KEYWORDS.length).toBeGreaterThan(20);
     expect(SENSITIVE_LABEL_KEYWORDS).toContain("password");

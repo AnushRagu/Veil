@@ -15,7 +15,7 @@ app.use(cors({
   ],
   credentials: false,
   methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Session-ID"],
 }));
 
 app.use(express.json({ limit: "500kb" }));
@@ -24,11 +24,11 @@ app.use(express.urlencoded({ extended: true, limit: "500kb" }));
 app.use("/api/agent", agentRouter);
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({ status: "ok", service: "VEIL Server", timestamp: new Date().toISOString() });
 });
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error("[SERVER ERROR]", err);
+  console.error("[VEIL SERVER ERROR]", err);
   res.status(500).json({ error: "Internal server error" });
 });
 
@@ -37,20 +37,20 @@ app.use((_req, res) => {
 });
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`[PrivateSight Server] Running on http://${HOST}:${PORT}`);
-  console.log(`[PrivateSight Server] Agent endpoint: POST http://${HOST}:${PORT}/api/agent/plan`);
-  console.log(`[PrivateSight Server] Health check: GET http://${HOST}:${PORT}/health`);
+  console.log(`[VEIL Server] Running on http://${HOST}:${PORT}`);
+  console.log(`[VEIL Server] Agent endpoint: POST http://${HOST}:${PORT}/api/agent/plan`);
+  console.log(`[VEIL Server] Health check: GET http://${HOST}:${PORT}/health`);
 });
 
 process.on("SIGTERM", () => {
-  console.log("[PrivateSight Server] SIGTERM received, shutting down...");
+  console.log("[VEIL Server] SIGTERM received, shutting down...");
   server.close(() => {
     process.exit(0);
   });
 });
 
 process.on("SIGINT", () => {
-  console.log("[PrivateSight Server] SIGINT received, shutting down...");
+  console.log("[VEIL Server] SIGINT received, shutting down...");
   server.close(() => {
     process.exit(0);
   });

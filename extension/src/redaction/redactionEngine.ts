@@ -3,7 +3,7 @@ import {
   RedactionEntry,
   RedactionManifest,
   SanitizedElement,
-} from "@privatesight/shared";
+} from "@veil/shared";
 import {
   detectPIICategory,
   findAllPII,
@@ -26,7 +26,14 @@ export interface RedactionResult {
   redactedText: Map<string, string>;
 }
 
-const SENSITIVE_ROLES = ["textbox", "searchbox", "combobox", "spinbutton"];
+const SENSITIVE_ROLES = ["textbox", "searchbox", "combobox", "spinbutton", "password"];
+
+function generateVeilUUID(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return `el-${crypto.randomUUID()}`;
+  }
+  return `el-${Math.random().toString(36).substring(2, 10)}-${Date.now().toString(36)}`;
+}
 
 function elementHasSensitiveAttribute(el: Element): boolean {
   return EXPLICIT_SENSITIVE_ATTRS.some((attr) => el.hasAttribute(attr));
@@ -67,13 +74,37 @@ function getNearbyLabelText(el: Element): string {
   return "";
 }
 
+/**
+ * Defensive sensitivity classifier:
+ * If uncertain -> conservatively redact.
+ * Detects deceptive inputs (e.g. input disguised as search collecting credentials)
+ */
 function classifyElementSensitivity(el: Element, textContent: string): boolean {
   if (elementHasSensitiveAttribute(el)) return true;
   if (elementHasSensitiveAutocomplete(el)) return true;
   if (elementHasSensitiveInputType(el)) return true;
   if (elementLabelIndicatesSensitive(el)) return true;
+
   const nearbyLabel = getNearbyLabelText(el).toLowerCase();
   if (SENSITIVE_LABEL_KEYWORDS.some((kw) => nearbyLabel.includes(kw))) return true;
+
+  // Deceptive input check: form field inside credential/auth forms or disguised names
+  const formParent = el.closest("form");
+  if (formParent) {
+    const formAction = (formParent.getAttribute("action") || "").toLowerCase();
+    const formClass = (formParent.getAttribute("class") || "").toLowerCase();
+    const formId = (formParent.getAttribute("id") || "").toLowerCase();
+    if (
+      ["login", "auth", "signin", "password", "checkout", "payment"].some((s) =>
+        formAction.includes(s) || formClass.includes(s) || formId.includes(s)
+      )
+    ) {
+      if (el instanceof HTMLInputElement && (el.type === "password" || el.name.toLowerCase().includes("pass") || el.name.toLowerCase().includes("key") || el.name.toLowerCase().includes("token"))) {
+        return true;
+      }
+    }
+  }
+
   const role = el.getAttribute("role") || "";
   if (SENSITIVE_ROLES.includes(role)) {
     const pii = detectPIICategory(textContent);
@@ -81,24 +112,47 @@ function classifyElementSensitivity(el: Element, textContent: string): boolean {
       return true;
     }
   }
+
   return false;
 }
 
+/**
+ * Phase 2: Unbreakable Element Grounding
+ * Extracts sanitized elements from DOM.
+ * Stamping rule: Every extracted element is stamped with a persistent `data-veil-id` attribute.
+ * If already stamped, preserves the persistent ID. Never uses sequential array index mapping.
+ *
+ * Attack defense: Ignores hidden elements (display:none, visibility:hidden, opacity:0, 0x0 size)
+ * to neutralize prompt injections embedded in hidden DOM divs.
+ */
 export function extractSanitizedElements(
   root: Document | Element = document
 ): SanitizedElement[] {
   const elements: SanitizedElement[] = [];
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+  const rootNode = (root instanceof Document ? root.body || root.documentElement : root) || root;
+
+  const walker = document.createTreeWalker(rootNode, NodeFilter.SHOW_ELEMENT, {
     acceptNode(node) {
       const el = node as Element;
-      const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") {
+
+      // Defensive check: Filter out hidden injection containers
+      if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+        const style = window.getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+          return NodeFilter.FILTER_REJECT;
+        }
+      }
+
+      // Filter out elements explicitly hidden via HTML attributes
+      if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") {
         return NodeFilter.FILTER_REJECT;
       }
+
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) {
         return NodeFilter.FILTER_REJECT;
       }
+
       const role = el.getAttribute("role") || getImplicitRole(el);
       if (["button", "link", "textbox", "combobox", "checkbox", "radio", "menuitem", "tab", "heading", "img", "searchbox", "slider", "spinbutton", "switch", "option", "listbox", "dialog"].includes(role)) {
         return NodeFilter.FILTER_ACCEPT;
@@ -110,11 +164,17 @@ export function extractSanitizedElements(
     },
   });
 
-  let index = 0;
   while (walker.nextNode()) {
     const el = walker.currentNode as Element;
     const rect = el.getBoundingClientRect();
     if (rect.width === 0 && rect.height === 0) continue;
+
+    // Persistent Grounding: Get or stamp persistent data-veil-id
+    let veilId = el.getAttribute("data-veil-id");
+    if (!veilId) {
+      veilId = generateVeilUUID();
+      el.setAttribute("data-veil-id", veilId);
+    }
 
     const role = (el.getAttribute("role") || getImplicitRole(el)) as SanitizedElement["role"];
     const label = getAccessibleLabel(el);
@@ -122,7 +182,9 @@ export function extractSanitizedElements(
     const sensitive = classifyElementSensitivity(el, textContent);
 
     elements.push({
-      id: `el-${index++}-${generateId()}`,
+      id: veilId,
+      dataVeilId: veilId,
+      originalTag: el.tagName.toLowerCase(),
       role,
       label: sanitizeLabel(label, sensitive),
       bounds: {
@@ -195,8 +257,11 @@ function sanitizeLabel(label: string, sensitive: boolean): string {
 }
 
 function isElementVisible(el: Element): boolean {
-  const style = getComputedStyle(el);
-  return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  if (typeof window !== "undefined" && typeof window.getComputedStyle === "function") {
+    const style = window.getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  }
+  return true;
 }
 
 function isElementEnabled(el: Element): boolean {
@@ -204,10 +269,6 @@ function isElementEnabled(el: Element): boolean {
     return !el.disabled;
   }
   return true;
-}
-
-function generateId(): string {
-  return Math.random().toString(36).substring(2, 10);
 }
 
 function hasValidBounds(bounds: Bounds | undefined): bounds is Bounds {

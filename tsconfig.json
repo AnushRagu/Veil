@@ -14,9 +14,10 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@privatesight/shared/*": ["shared/src/*"],
-      "@privatesight/extension/*": ["extension/src/*"],
-      "@privatesight/server/*": ["server/src/*"]
+      "@veil/shared": ["shared/src/index.ts"],
+      "@veil/shared/*": ["shared/src/*"],
+      "@veil/extension/*": ["extension/src/*"],
+      "@veil/server/*": ["server/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build"]

@@ -1,4 +1,4 @@
-import { ServerPlan, PageMap, RedactionEntry } from "@privatesight/shared";
+import { ServerPlan, PageMap, RedactionEntry } from "@veil/shared";
 export interface PlannerContext {
     userGoal: string;
     pageMap: PageMap;

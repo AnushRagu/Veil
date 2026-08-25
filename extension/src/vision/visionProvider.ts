@@ -1,4 +1,4 @@
-import { Bounds } from "@privatesight/shared";
+import { Bounds } from "@veil/shared";
 
 export interface VisionDetection {
   bounds: Bounds;
@@ -7,10 +7,16 @@ export interface VisionDetection {
   classId: number;
 }
 
+export type VisionInput = ImageData | HTMLCanvasElement | HTMLVideoElement | ImageBitmap | {
+  data: Uint8ClampedArray | Uint8Array;
+  width: number;
+  height: number;
+};
+
 export interface VisionProvider {
   name: string;
   initialize(): Promise<void>;
-  detect(imageData: ImageData | HTMLCanvasElement | HTMLVideoElement): Promise<VisionDetection[]>;
+  detect(input: VisionInput): Promise<VisionDetection[]>;
   dispose(): void;
   isReady(): boolean;
 }
@@ -22,7 +28,7 @@ export interface ModelConfig {
   confidenceThreshold: number;
   iouThreshold: number;
   classNames: string[];
-  executionProvider: "webgpu" | "wasm";
+  executionProvider: "wasm" | "webgpu";
 }
 
 export const DEFAULT_MODEL_CONFIG: ModelConfig = {
@@ -31,8 +37,8 @@ export const DEFAULT_MODEL_CONFIG: ModelConfig = {
   inputHeight: 320,
   confidenceThreshold: 0.5,
   iouThreshold: 0.45,
-  classNames: ["face", "person", "credit_card", "id_card", "screen"],
-  executionProvider: "webgpu",
+  classNames: ["face", "person", "credit_card", "id_card", "screen", "credentials_form"],
+  executionProvider: "wasm",
 };
 
 export const MOCK_DETECTIONS: VisionDetection[] = [
@@ -55,15 +61,20 @@ export class MockVisionProvider implements VisionProvider {
   private ready = false;
 
   async initialize(): Promise<void> {
-    await new Promise((r) => setTimeout(r, 100));
+    await new Promise((r) => setTimeout(r, 50));
     this.ready = true;
   }
 
-  async detect(): Promise<VisionDetection[]> {
-    return MOCK_DETECTIONS.map((d) => ({
-      ...d,
-      bounds: { ...d.bounds },
-    }));
+  async detect(input: VisionInput): Promise<VisionDetection[]> {
+    // If input is provided, we simulate real detection based on dimensions
+    const dims = getDimensions(input);
+    if (dims.width > 0 && dims.height > 0) {
+      return MOCK_DETECTIONS.map((d) => ({
+        ...d,
+        bounds: { ...d.bounds },
+      }));
+    }
+    return [];
   }
 
   dispose(): void {
@@ -73,6 +84,19 @@ export class MockVisionProvider implements VisionProvider {
   isReady(): boolean {
     return this.ready;
   }
+}
+
+function getDimensions(input: VisionInput): { width: number; height: number } {
+  if ("data" in input && typeof input.width === "number") {
+    return { width: input.width, height: input.height };
+  }
+  if (input instanceof ImageData || input instanceof HTMLCanvasElement || (typeof ImageBitmap !== "undefined" && input instanceof ImageBitmap)) {
+    return { width: input.width, height: input.height };
+  }
+  if (typeof HTMLVideoElement !== "undefined" && input instanceof HTMLVideoElement) {
+    return { width: input.videoWidth, height: input.videoHeight };
+  }
+  return { width: 800, height: 600 };
 }
 
 export class ONNXVisionProvider implements VisionProvider {
@@ -88,25 +112,32 @@ export class ONNXVisionProvider implements VisionProvider {
   async initialize(): Promise<void> {
     try {
       const ort = await import("onnxruntime-web");
-      const provider = this.config.executionProvider === "webgpu" && (await this.checkWebGPU())
+
+      // Configure WebAssembly SIMD and Threading options for truthful UI pixel analysis
+      if (ort.env?.wasm) {
+        ort.env.wasm.numThreads = Math.min(4, typeof navigator !== "undefined" && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 2);
+        ort.env.wasm.simd = true;
+      }
+
+      const executionProvider = this.config.executionProvider === "webgpu" && (await this.checkWebGPU())
         ? "webgpu"
         : "wasm";
 
       this.session = await ort.InferenceSession.create(this.config.modelPath, {
-        executionProviders: [provider],
+        executionProviders: [executionProvider],
         graphOptimizationLevel: "all",
       });
 
       this.ready = true;
-      console.log(`[Vision] ONNX model loaded with ${provider} backend`);
+      console.log(`[VEIL Vision] ONNX model loaded with ${executionProvider} backend (WASM SIMD threaded)`);
     } catch (error) {
-      console.error("[Vision] Failed to load ONNX model:", error);
+      console.error("[VEIL Vision] Failed to load ONNX model:", error);
       throw error;
     }
   }
 
   private async checkWebGPU(): Promise<boolean> {
-    if (!("gpu" in navigator)) return false;
+    if (typeof navigator === "undefined" || !("gpu" in navigator)) return false;
     try {
       const adapter = await (navigator as any).gpu.requestAdapter();
       return !!adapter;
@@ -115,12 +146,12 @@ export class ONNXVisionProvider implements VisionProvider {
     }
   }
 
-  async detect(input: ImageData | HTMLCanvasElement | HTMLVideoElement): Promise<VisionDetection[]> {
+  async detect(input: VisionInput): Promise<VisionDetection[]> {
     if (!this.session || !this.ready) {
       throw new Error("ONNX session not initialized");
     }
 
-    const { width, height } = this.getInputDimensions(input);
+    const { width, height } = getDimensions(input);
     const tensor = await this.preprocess(input, width, height);
 
     const feeds = { [this.session.inputNames[0]]: tensor };
@@ -130,47 +161,60 @@ export class ONNXVisionProvider implements VisionProvider {
     return this.postprocess(output.data, width, height);
   }
 
-  private getInputDimensions(input: ImageData | HTMLCanvasElement | HTMLVideoElement): { width: number; height: number } {
-    if (input instanceof ImageData) return { width: input.width, height: input.height };
-    if (input instanceof HTMLCanvasElement) return { width: input.width, height: input.height };
-    return { width: input.videoWidth, height: input.videoHeight };
-  }
-
   private async preprocess(
-    input: ImageData | HTMLCanvasElement | HTMLVideoElement,
+    input: VisionInput,
     srcWidth: number,
     srcHeight: number
   ): Promise<any> {
     const ort = await import("onnxruntime-web");
-    const canvas = document.createElement("canvas");
-    canvas.width = this.config.inputWidth;
-    canvas.height = this.config.inputHeight;
-    const ctx = canvas.getContext("2d")!;
+    const targetW = this.config.inputWidth;
+    const targetH = this.config.inputHeight;
 
-    if (input instanceof ImageData) {
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = srcWidth;
-      tempCanvas.height = srcHeight;
-      tempCanvas.getContext("2d")!.putImageData(input, 0, 0);
-      ctx.drawImage(tempCanvas, 0, 0, this.config.inputWidth, this.config.inputHeight);
-    } else {
-      ctx.drawImage(input, 0, 0, this.config.inputWidth, this.config.inputHeight);
-    }
+    let rawData: Uint8ClampedArray | Uint8Array | null = null;
 
-    const imageData = ctx.getImageData(0, 0, this.config.inputWidth, this.config.inputHeight);
-    const { data } = imageData;
-    const float32Data = new Float32Array(3 * this.config.inputHeight * this.config.inputWidth);
-
-    for (let i = 0; i < this.config.inputHeight; i++) {
-      for (let j = 0; j < this.config.inputWidth; j++) {
-        const srcIdx = (i * this.config.inputWidth + j) * 4;
-        float32Data[0 * this.config.inputHeight * this.config.inputWidth + i * this.config.inputWidth + j] = data[srcIdx] / 255;
-        float32Data[1 * this.config.inputHeight * this.config.inputWidth + i * this.config.inputWidth + j] = data[srcIdx + 1] / 255;
-        float32Data[2 * this.config.inputHeight * this.config.inputWidth + i * this.config.inputWidth + j] = data[srcIdx + 2] / 255;
+    if ("data" in input && input.data instanceof Uint8ClampedArray) {
+      rawData = input.data;
+    } else if (typeof document !== "undefined") {
+      const canvas = document.createElement("canvas");
+      canvas.width = targetW;
+      canvas.height = targetH;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        if ("data" in input) {
+          const imgData = new ImageData(new Uint8ClampedArray(input.data), input.width, input.height);
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = srcWidth;
+          tempCanvas.height = srcHeight;
+          tempCanvas.getContext("2d")?.putImageData(imgData, 0, 0);
+          ctx.drawImage(tempCanvas, 0, 0, targetW, targetH);
+        } else if (input instanceof ImageData) {
+          const tempCanvas = document.createElement("canvas");
+          tempCanvas.width = srcWidth;
+          tempCanvas.height = srcHeight;
+          tempCanvas.getContext("2d")?.putImageData(input, 0, 0);
+          ctx.drawImage(tempCanvas, 0, 0, targetW, targetH);
+        } else {
+          ctx.drawImage(input as CanvasImageSource, 0, 0, targetW, targetH);
+        }
+        const img = ctx.getImageData(0, 0, targetW, targetH);
+        rawData = img.data;
       }
     }
 
-    return new ort.Tensor("float32", float32Data, [1, 3, this.config.inputHeight, this.config.inputWidth]);
+    const float32Data = new Float32Array(3 * targetH * targetW);
+
+    if (rawData) {
+      for (let i = 0; i < targetH; i++) {
+        for (let j = 0; j < targetW; j++) {
+          const srcIdx = (i * targetW + j) * 4;
+          float32Data[0 * targetH * targetW + i * targetW + j] = rawData[srcIdx] / 255.0;
+          float32Data[1 * targetH * targetW + i * targetW + j] = rawData[srcIdx + 1] / 255.0;
+          float32Data[2 * targetH * targetW + i * targetW + j] = rawData[srcIdx + 2] / 255.0;
+        }
+      }
+    }
+
+    return new ort.Tensor("float32", float32Data, [1, 3, targetH, targetW]);
   }
 
   private postprocess(outputData: Float32Array, srcWidth: number, srcHeight: number): VisionDetection[] {

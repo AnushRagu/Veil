@@ -24,8 +24,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      "@privatesight/shared": resolve(__dirname, "../shared/src/index.ts"),
-      "@privatesight/shared/schemas": resolve(__dirname, "../shared/src/schemas/index.ts"),
+      "@veil/shared": resolve(__dirname, "../shared/src/index.ts"),
+      "@veil/shared/schemas": resolve(__dirname, "../shared/src/schemas/index.ts"),
     },
   },
   build: {
