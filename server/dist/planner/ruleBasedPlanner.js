@@ -35,25 +35,26 @@ export function createRuleBasedPlan(context) {
     // Check if goal is directional scroll
     const isScrollUp = goalLower.includes("scroll up") || goalLower.includes("scroll to top") || (goalLower.includes("up") && goalLower.includes("scroll"));
     const isScrollDown = goalLower.includes("scroll down") || goalLower.includes("scroll to bottom") || (goalLower.includes("down") && goalLower.includes("scroll"));
-    // Check if goal is form preparation
-    const isFormPrepGoal = (goalLower.includes("prepare") && goalLower.includes("form")) ||
-        (goalLower.includes("fill") && goalLower.includes("form")) ||
-        goalLower === "prepare the form for filling" ||
-        goalLower === "prepare form";
     // Check if goal is submit / click button
-    const isSubmitGoal = !isFormPrepGoal &&
-        (goalLower.includes("submit") ||
-            goalLower.includes("send") ||
-            goalLower.includes("click the button") ||
-            goalLower.includes("checkout") ||
-            goalLower.includes("buy"));
+    const isSubmitGoal = goalLower.includes("submit") ||
+        goalLower.includes("send") ||
+        goalLower.includes("click the button") ||
+        goalLower.includes("checkout") ||
+        goalLower.includes("buy");
+    // Check if goal is form preparation
+    const isFormPrepGoal = !isSubmitGoal &&
+        ((goalLower.includes("prepare") && goalLower.includes("form")) ||
+            (goalLower.includes("fill") && goalLower.includes("form")) ||
+            goalLower === "prepare the form for filling" ||
+            goalLower === "prepare form" ||
+            goalLower.includes("prepare"));
     // Check if goal is search
     const isSearchGoal = goalLower.includes("search") || goalLower.includes("find product");
     // Check if goal is completely unknown/random
     const isKnownIntent = isScrollUp ||
         isScrollDown ||
-        isFormPrepGoal ||
         isSubmitGoal ||
+        isFormPrepGoal ||
         isSearchGoal ||
         goalLower.includes("do something") ||
         goalLower.includes("click") ||
@@ -88,6 +89,35 @@ export function createRuleBasedPlan(context) {
         summary = "Scrolling down to reveal more content.";
         confidence = 0.9;
         highestRiskLevel = "level_0_observation";
+    }
+    else if (isSubmitGoal) {
+        if (submitBtn) {
+            actions.push({
+                id: crypto.randomUUID(),
+                type: "highlight",
+                target: { elementId: submitBtn.id, dataVeilId: submitBtn.dataVeilId, expectedRole: submitBtn.role, expectedLabel: submitBtn.label },
+                reason: "Highlight submit button for user review",
+                confidence: 0.9,
+                riskLevel: "level_0_observation",
+                explanation: `VEIL is highlighting the submit button "${submitBtn.label}".`,
+            });
+            actions.push({
+                id: crypto.randomUUID(),
+                type: "focus",
+                target: { elementId: submitBtn.id, dataVeilId: submitBtn.dataVeilId, expectedRole: submitBtn.role, expectedLabel: submitBtn.label },
+                reason: "Focus submit button to prepare for interaction",
+                confidence: 0.85,
+                riskLevel: "level_0_observation",
+                explanation: `VEIL is focusing the submit button "${submitBtn.label}".`,
+            });
+            summary = `Found submit button: "${submitBtn.label}". Highlighted and focused for review.`;
+            confidence = 0.85;
+            highestRiskLevel = "level_3_consequential";
+        }
+        else {
+            summary = "No submit-like button found on page.";
+            confidence = 0.4;
+        }
     }
     else if (isFormPrepGoal) {
         const safeFields = formFields.filter((f) => !f.sensitive && (f.label.toLowerCase().includes("name") || f.role === "textbox"));
@@ -133,35 +163,6 @@ export function createRuleBasedPlan(context) {
         }
         else {
             summary = "No safe form fields found for preparation.";
-            confidence = 0.4;
-        }
-    }
-    else if (isSubmitGoal) {
-        if (submitBtn) {
-            actions.push({
-                id: crypto.randomUUID(),
-                type: "highlight",
-                target: { elementId: submitBtn.id, dataVeilId: submitBtn.dataVeilId, expectedRole: submitBtn.role, expectedLabel: submitBtn.label },
-                reason: "Highlight submit button for user review",
-                confidence: 0.9,
-                riskLevel: "level_0_observation",
-                explanation: `VEIL is highlighting the submit button "${submitBtn.label}".`,
-            });
-            actions.push({
-                id: crypto.randomUUID(),
-                type: "focus",
-                target: { elementId: submitBtn.id, dataVeilId: submitBtn.dataVeilId, expectedRole: submitBtn.role, expectedLabel: submitBtn.label },
-                reason: "Focus submit button to prepare for interaction",
-                confidence: 0.85,
-                riskLevel: "level_0_observation",
-                explanation: `VEIL is focusing the submit button "${submitBtn.label}".`,
-            });
-            summary = `Found submit button: "${submitBtn.label}". Highlighted and focused for review.`;
-            confidence = 0.85;
-            highestRiskLevel = "level_3_consequential";
-        }
-        else {
-            summary = "No submit-like button found on page.";
             confidence = 0.4;
         }
     }
