@@ -6,13 +6,11 @@ import {
   Bounds,
   ClientPayload,
 } from "@privatesight/shared";
-import { createVisionPipeline, VisionPipeline, VisionResult } from "../vision/visionPipeline";
 import { sanitizeString, getOrigin, generateSessionId } from "../utils/helpers";
 
 interface ContentScriptState {
   sessionId: string | null;
   pageMap: PageMap | null;
-  visionPipeline: VisionPipeline | null;
   lastScreenshot: HTMLCanvasElement | null;
   lastRedactionManifest: RedactionManifest;
   isCapturing: boolean;
@@ -21,21 +19,10 @@ interface ContentScriptState {
 const state: ContentScriptState = {
   sessionId: null,
   pageMap: null,
-  visionPipeline: null,
   lastScreenshot: null,
   lastRedactionManifest: [],
   isCapturing: false,
 };
-
-async function initializeVisionPipeline(): Promise<VisionPipeline> {
-  const pipeline = createVisionPipeline({
-    provider: "mock",
-    enableFaceDetection: true,
-    enableSensitiveRegionDetection: true,
-  });
-  await pipeline.initialize();
-  return pipeline;
-}
 
 function buildPageMap(elements: SanitizedElement[]): PageMap {
   return {
@@ -92,6 +79,36 @@ async function captureViewport(): Promise<HTMLCanvasElement> {
   return canvas;
 }
 
+interface VisionResponse {
+  ok: boolean;
+  result?: {
+    redactionEntries: RedactionManifest;
+  };
+  error?: string;
+}
+
+function requestVisionProcessing(
+  dataUrl: string,
+  width: number,
+  height: number
+): Promise<VisionResponse> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(
+      {
+        type: "VISION_PROCESS",
+        imageData: { dataUrl, width, height },
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ ok: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response ?? { ok: false, error: "No response from background" });
+      }
+    );
+  });
+}
+
 async function performCapture(userGoal: string): Promise<ClientPayload> {
   if (state.isCapturing) {
     throw new Error("Capture already in progress");
@@ -105,12 +122,8 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
     const canvas = await captureViewport();
     state.lastScreenshot = canvas;
 
-    if (!state.visionPipeline) {
-      state.visionPipeline = await initializeVisionPipeline();
-    }
-
-    const visionResult = await state.visionPipeline.processFrame(canvas, []);
-
+    // Run DOM-based redaction locally. This produces a redaction manifest
+    // (without vision-based entries) and a sanitized element list.
     const redactionContext: RedactionContext = {
       elements: pageMap.elements,
       screenshotWidth: canvas.width,
@@ -118,10 +131,26 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
     };
 
     const redactionResult = processRedaction(redactionContext);
-    const combinedManifest = [...redactionResult.manifest, ...visionResult.redactionEntries];
+    const localManifest = redactionResult.manifest;
+
+    // Hand the screenshot off to the offscreen vision pipeline through the
+    // background service worker. The content script never touches ONNX or
+    // any module that uses import.meta.
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+    const visionResponse = await requestVisionProcessing(
+      dataUrl,
+      canvas.width,
+      canvas.height
+    );
+
+    const visionEntries: RedactionManifest = visionResponse.ok && visionResponse.result
+      ? visionResponse.result.redactionEntries
+      : [];
+
+    const combinedManifest: RedactionManifest = [...localManifest, ...visionEntries];
 
     const finalElements = redactionResult.redactedElements.map((el) => {
-      const visionRedaction = visionResult.redactionEntries.find((r) => {
+      const visionRedaction = visionEntries.find((r) => {
         if (!hasValidBounds(r.bounds) || !hasValidBounds(el.bounds)) return false;
         const rb = r.bounds;
         const eb = el.bounds;
@@ -138,14 +167,11 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
 
     const finalPageMap = buildPageMap(finalElements);
 
-    let sanitizedScreenshot: string | undefined;
-    if (visionResult.redactedCanvas) {
-      sanitizedScreenshot = visionResult.redactedCanvas.toDataURL("image/jpeg", 0.7);
-    } else {
-      const redactedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
-      applyRedactionsToCanvas(redactedCanvas, combinedManifest);
-      sanitizedScreenshot = redactedCanvas.toDataURL("image/jpeg", 0.7);
-    }
+    // Apply all redactions (DOM + vision) to a clone of the screenshot so
+    // the only image data leaving the device is fully redacted.
+    const sanitizedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
+    applyRedactionsToCanvas(sanitizedCanvas, combinedManifest);
+    const sanitizedScreenshot = sanitizedCanvas.toDataURL("image/jpeg", 0.7);
 
     state.pageMap = finalPageMap;
     state.lastRedactionManifest = combinedManifest;
@@ -309,7 +335,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           sendResponse({
             success: true,
             status: {
-              backend: state.visionPipeline?.getBackend() ?? "mock",
+              backend: "mock" as const,
               redactedCount: state.lastRedactionManifest.length,
               lastCapture: state.sessionId ? new Date().toISOString() : undefined,
               sessionActive: !!state.sessionId,
@@ -322,8 +348,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           state.pageMap = null;
           state.lastScreenshot = null;
           state.lastRedactionManifest = [];
-          state.visionPipeline?.dispose();
-          state.visionPipeline = null;
           sendResponse({ success: true });
           break;
         }
@@ -337,4 +361,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
-console.log("[PrivateSight] Content script loaded");
+console.log("[Veil] Content script loaded");

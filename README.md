@@ -1,12 +1,12 @@
-# PrivateSight
+# Veil
 
-> A privacy-preserving browser vision agent that analyzes web pages locally, redacts sensitive information, and executes safe actions with user consent.
+> Private browsing vision for AI agents.
 
 ## Architecture Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                            PrivateSight System                               │
+│                            Veil System                               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐                │
@@ -47,7 +47,7 @@
 
 ## Data Flow
 
-1. **User Goal Input** → Extension popup
+1. **User Goal Input** → Veil popup
 2. **Content Script** extracts visible DOM structure (no values from sensitive fields)
 3. **Vision Pipeline** runs local ONNX model (WebGPU/WASM) to detect faces/sensitive regions
 4. **Redaction Engine** masks PII in both DOM and screenshot
@@ -125,7 +125,7 @@
 ```bash
 # Clone and install
 git clone <repo>
-cd PrivateSight
+cd Veil
 npm install
 
 # Build all packages
@@ -169,7 +169,7 @@ npm run docker:up
 ## Usage
 
 1. Open the demo page (or any page)
-2. Click PrivateSight extension icon
+2. Click Veil extension icon
 3. Enter a goal: *"Find the submit button and prepare the form"*
 4. Click "Analyze & Plan"
 5. Review sanitized preview and redaction manifest
@@ -213,7 +213,7 @@ npm run docker:up
 ## Project Structure
 
 ```
-PrivateSight/
+Veil/
 ├── extension/           # Browser extension (Manifest V3)
 │   ├── src/
 │   │   ├── background/  # Service worker (server comms, policy)

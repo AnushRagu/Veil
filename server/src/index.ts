@@ -37,20 +37,20 @@ app.use((_req, res) => {
 });
 
 const server = app.listen(PORT, HOST, () => {
-  console.log(`[PrivateSight Server] Running on http://${HOST}:${PORT}`);
-  console.log(`[PrivateSight Server] Agent endpoint: POST http://${HOST}:${PORT}/api/agent/plan`);
-  console.log(`[PrivateSight Server] Health check: GET http://${HOST}:${PORT}/health`);
+  console.log(`[Veil Server] Running on http://${HOST}:${PORT}`);
+  console.log(`[Veil Server] Agent endpoint: POST http://${HOST}:${PORT}/api/agent/plan`);
+  console.log(`[Veil Server] Health check: GET http://${HOST}:${PORT}/health`);
 });
 
 process.on("SIGTERM", () => {
-  console.log("[PrivateSight Server] SIGTERM received, shutting down...");
+  console.log("[Veil Server] SIGTERM received, shutting down...");
   server.close(() => {
     process.exit(0);
   });
 });
 
 process.on("SIGINT", () => {
-  console.log("[PrivateSight Server] SIGINT received, shutting down...");
+  console.log("[Veil Server] SIGINT received, shutting down...");
   server.close(() => {
     process.exit(0);
   });

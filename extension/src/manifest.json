@@ -1,5 +1,5 @@
 {
-  "name": "PrivateSight",
+  "name": "Veil",
   "version": "0.1.0",
   "description": "Privacy-preserving browser vision agent",
   "manifest_version": 3,
@@ -7,7 +7,8 @@
     "activeTab",
     "scripting",
     "storage",
-    "tabs"
+    "tabs",
+    "offscreen"
   ],
   "host_permissions": [
     "http://localhost:3001/*",
@@ -26,8 +27,8 @@
     }
   ],
   "action": {
-    "default_popup": "src/popup/index.html",
-    "default_title": "PrivateSight",
+    "default_popup": "popup.html",
+    "default_title": "Veil",
     "default_icon": {
       "16": "icon-16.svg",
       "32": "icon-32.svg",
@@ -41,6 +42,17 @@
     "48": "icon-48.svg",
     "128": "icon-128.svg"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "ort.bundle.min.mjs",
+        "ort-wasm-simd-threaded.jsep.wasm",
+        "models/*",
+        "offscreen.html"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
   }

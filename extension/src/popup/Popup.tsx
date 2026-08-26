@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { createRoot } from "react-dom/client";
 import {
   PrivacyStatus,
   ClientPayload,
@@ -8,34 +7,84 @@ import {
   ActionPolicy,
   TelemetryEntry,
 } from "@privatesight/shared";
+import {
+  ShieldIcon,
+  ServerIcon,
+  TargetIcon,
+  SparkleIcon,
+  ChevronIcon,
+  AlertIcon,
+  TrashIcon,
+  CheckIcon,
+  InfoIcon,
+  GaugeIcon,
+  EyeOffIcon,
+  CrosshairIcon,
+  PulseIcon,
+  SettingsIcon,
+} from "./icons";
 
 interface PopupProps {}
 
-const ActionBadge: React.FC<{ policy: ActionPolicy; label: string }> = ({ policy, label }) => {
-  const colors: Record<ActionPolicy, string> = {
-    auto: "bg-green-500",
-    confirm: "bg-yellow-500",
-    reject: "bg-red-500",
-  };
-  return (
-    <span className={`px-2 py-0.5 text-xs font-medium rounded ${colors[policy]} text-white`}>
-      {label}
-    </span>
-  );
-};
+type StatusTone = "ok" | "warn" | "danger" | "off";
 
-const MetricCard: React.FC<{ label: string; value: string | number; unit?: string }> = ({
-  label,
-  value,
-  unit,
-}) => (
-  <div className="bg-gray-50 rounded-lg p-3">
-    <div className="text-xs text-gray-500 uppercase tracking-wide">{label}</div>
-    <div className="text-lg font-mono font-semibold text-gray-900">
-      {value}{unit && <span className="text-xs font-normal text-gray-500 ml-1">{unit}</span>}
+const StatusPill: React.FC<{
+  tone: StatusTone;
+  children: React.ReactNode;
+}> = ({ tone, children }) => (
+  <span className={`status status--${tone}`}>
+    <span className="status__dot" />
+    {children}
+  </span>
+);
+
+const MetricCard: React.FC<{
+  label: string;
+  value: string | number;
+  unit?: string;
+  accent?: boolean;
+}> = ({ label, value, unit, accent }) => (
+  <div className={`metric ${accent ? "metric--accent" : ""}`}>
+    <div className="metric__label">{label}</div>
+    <div className="metric__value">
+      {value}
+      {unit && <span className="metric__unit">{unit}</span>}
     </div>
   </div>
 );
+
+const ToggleCard: React.FC<{
+  active: boolean;
+  onToggle: () => void;
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  disabled?: boolean;
+}> = ({ active, onToggle, icon, title, hint, disabled }) => (
+  <button
+    type="button"
+    role="switch"
+    aria-checked={active}
+    onClick={() => !disabled && onToggle()}
+    className={`toggle ${active ? "toggle--on" : ""}`}
+    disabled={disabled}
+  >
+    <span className="toggle__icon">{icon}</span>
+    <span className="toggle__label">
+      <span className="toggle__title">{title}</span>
+      <span className="toggle__hint">{hint}</span>
+    </span>
+  </button>
+);
+
+const policyMeta: Record<
+  ActionPolicy,
+  { label: string; tone: StatusTone }
+> = {
+  auto: { label: "Auto", tone: "ok" },
+  confirm: { label: "Confirm", tone: "warn" },
+  reject: { label: "Blocked", tone: "danger" },
+};
 
 const ServerActionItem: React.FC<{
   action: ValidatedAction;
@@ -48,53 +97,68 @@ const ServerActionItem: React.FC<{
   const reason = action.reason ?? "";
   const mappedElement = action.mappedElement;
   const isPending = policy === "confirm";
+  const meta = policyMeta[policy];
+  const confidence = a.confidence ?? 0;
+  const confidencePct = Math.round(confidence * 100);
 
   return (
-    <div className={`border-l-4 p-3 rounded-r-lg ${isPending ? "border-yellow-400 bg-yellow-50" : policy === "auto" ? "border-green-400 bg-green-50" : "border-red-400 bg-red-50"}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="font-mono text-sm text-gray-500">#{index + 1}</span>
-            <span className="px-2 py-0.5 text-xs font-medium bg-gray-200 rounded">{a.type}</span>
-            <ActionBadge policy={policy} label={policy} />
-            <span className="text-xs text-gray-500">conf: {Math.round((a.confidence ?? 0) * 100)}%</span>
-          </div>
-          <div className="mt-1 text-sm text-gray-700">{a.reason ?? ""}</div>
-          {mappedElement && (
-            <div className="mt-1 text-xs text-gray-500 font-mono">
-              Target: {mappedElement.label ?? ""} ({mappedElement.role ?? ""})
-            </div>
-          )}
-          <div className="mt-1 text-xs text-gray-500">{reason}</div>
+    <div className={`action action--${policy}`}>
+      <span className="action__index">#{String(index + 1).padStart(2, "0")}</span>
+      <div className="action__body">
+        <div className="action__top">
+          <span className="action__type">{a.type}</span>
+          <StatusPill tone={meta.tone}>{meta.label}</StatusPill>
+          <span className="action__confidence" title={`Confidence ${confidencePct}%`}>
+            <span
+              className="action__confidence-bar"
+              style={{ ["--confidence" as any]: confidence }}
+            />
+            {confidencePct}%
+          </span>
         </div>
-        {isPending && (
-          <div className="flex gap-1 flex-shrink-0">
-            <button
-              onClick={() => onConfirm(a.id ?? "")}
-              className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
-            >
-              Allow
-            </button>
-            <button
-              onClick={() => onReject(a.id ?? "")}
-              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700"
-            >
-              Block
-            </button>
+        <div className="action__reason">{a.reason ?? ""}</div>
+        {mappedElement && (
+          <div className="action__target">
+            <CrosshairIcon size={11} />
+            <span className="action__target-label">
+              {mappedElement.label || "(unlabeled)"}
+            </span>
+            <span>·</span>
+            <span>{mappedElement.role}</span>
           </div>
         )}
-        {policy === "auto" && (
-          <span className="text-xs text-green-700 font-medium flex-shrink-0">Auto-executed</span>
-        )}
-        {policy === "reject" && (
-          <span className="text-xs text-red-700 font-medium flex-shrink-0">Blocked</span>
-        )}
+        {reason && <div className="action__reason-note">{reason}</div>}
       </div>
+      {isPending && (
+        <div className="action__buttons">
+          <button
+            onClick={() => onConfirm(a.id ?? "")}
+            className="btn btn--sm btn--success"
+            title="Allow this action"
+          >
+            <CheckIcon size={12} strokeWidth={2.4} />
+            Allow
+          </button>
+          <button
+            onClick={() => onReject(a.id ?? "")}
+            className="btn btn--sm btn--secondary"
+            title="Block this action"
+          >
+            Block
+          </button>
+        </div>
+      )}
+      {policy === "auto" && (
+        <span className="action__state action__state--auto">Executed</span>
+      )}
+      {policy === "reject" && (
+        <span className="action__state action__state--reject">Blocked</span>
+      )}
     </div>
   );
 };
 
-const Popup: React.FC = () => {
+const Popup: React.FC<PopupProps> = () => {
   const [active, setActive] = useState(false);
   const [serverConnected, setServerConnected] = useState(false);
   const [serverUrl, setServerUrl] = useState("http://localhost:3001");
@@ -106,9 +170,11 @@ const Popup: React.FC = () => {
   const [telemetry, setTelemetry] = useState<TelemetryEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showManifest, setShowManifest] = useState(false);
   const [showTelemetry, setShowTelemetry] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
-  const sendMessage = useCallback(
+  const sendBackgroundMessage = useCallback(
     (type: string, data?: any): Promise<any> => {
       return new Promise((resolve) => {
         chrome.runtime.sendMessage({ type, ...data }, (response) => {
@@ -123,34 +189,57 @@ const Popup: React.FC = () => {
     []
   );
 
+  const sendContentMessage = useCallback(
+    (type: string, data?: any, tabId?: number): Promise<any> => {
+      return new Promise((resolve) => {
+        const targetTabId = tabId || (() => {
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs.length > 0) {
+              chrome.tabs.sendMessage(tabs[0].id!, { type, ...data }, (response) => {
+                if (chrome.runtime.lastError) {
+                  resolve({ success: false, error: chrome.runtime.lastError.message });
+                } else {
+                  resolve(response);
+                }
+              });
+            } else {
+              resolve({ success: false, error: "No active tab found" });
+            }
+          });
+        })();
+      });
+    },
+    []
+  );
+
   const refreshStatus = useCallback(async () => {
-    const response = await sendMessage("GET_PRIVACY_STATUS");
+    const response = await sendContentMessage("GET_PRIVACY_STATUS");
     if (response.success) {
       setPrivacyStatus(response.status);
     }
-    const config = await sendMessage("GET_SERVER_CONFIG");
+    const config = await sendBackgroundMessage("GET_SERVER_CONFIG");
     if (config.success) {
       setServerConnected(config.config.enabled);
       setServerUrl(config.config.url);
     }
-  }, [sendMessage]);
+  }, [sendContentMessage, sendBackgroundMessage]);
 
   const handleCapture = async () => {
     if (!userGoal.trim()) {
-      setError("Please enter a goal");
+      setError("Please enter a goal before analyzing the page.");
       return;
     }
     setLoading(true);
     setError(null);
 
     try {
-      const captureResponse = await sendMessage("CAPTURE_AND_SEND", { userGoal });
+      const captureResponse = await sendContentMessage("CAPTURE_AND_SEND", { userGoal });
       if (!captureResponse.success) throw new Error(captureResponse.error);
 
       const payload = captureResponse.payload;
       setLastPayload(payload);
 
-      const serverResponse = await sendMessage("SEND_TO_SERVER", {
+      const serverResponse = await sendBackgroundMessage("SEND_TO_SERVER", {
         payload,
         pageMapElements: payload.pageMap.elements,
       });
@@ -178,7 +267,7 @@ const Popup: React.FC = () => {
     const action = validatedActions.find((a) => a.action.id === actionId);
     if (!action || !action.action.id) return;
 
-    const executeResponse = await sendMessage("EXECUTE_ACTIONS", { actions: [action.action] });
+    const executeResponse = await sendContentMessage("EXECUTE_ACTIONS", { actions: [action.action] });
     if (executeResponse.success) {
       setValidatedActions((prev) =>
         prev.map((a) => {
@@ -205,7 +294,7 @@ const Popup: React.FC = () => {
   };
 
   const handleClearSession = async () => {
-    await sendMessage("CLEAR_SESSION");
+    await sendContentMessage("CLEAR_SESSION");
     setLastPayload(null);
     setServerPlan(null);
     setValidatedActions([]);
@@ -217,7 +306,7 @@ const Popup: React.FC = () => {
     setServerUrl(url);
     try {
       new URL(url);
-      await sendMessage("UPDATE_SERVER_CONFIG", { config: { url, enabled: true } });
+      await sendBackgroundMessage("UPDATE_SERVER_CONFIG", { config: { url, enabled: true } });
       setServerConnected(true);
     } catch {
       setServerConnected(false);
@@ -232,138 +321,225 @@ const Popup: React.FC = () => {
 
   const redactedCount = lastPayload?.redactionManifest?.length ?? 0;
   const payloadSize = lastPayload?.sanitizedScreenshot?.length ?? 0;
+  const payloadKb = Math.round(payloadSize / 1024);
+  const backend = privacyStatus?.backend ?? "mock";
+  const sessionActive = !!privacyStatus?.sessionActive;
+  const pendingActionCount = validatedActions.filter((a) => a.policy === "confirm").length;
+
+  const overallTone: StatusTone = !active
+    ? "off"
+    : !serverConnected
+    ? "warn"
+    : loading
+    ? "warn"
+    : error
+    ? "danger"
+    : "ok";
+
+  const overallLabel = !active
+    ? "Idle"
+    : !serverConnected
+    ? "Server offline"
+    : loading
+    ? "Analyzing…"
+    : error
+    ? "Error"
+    : sessionActive
+    ? "Secured"
+    : "Ready";
 
   return (
-    <div className="w-96 min-h-[500px] bg-white font-system text-gray-900">
-      <div className="border-b p-4 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-teal-600 rounded-lg flex items-center justify-center">
-            <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m-6 11a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
+    <div className="popup">
+      {/* Header */}
+      <header className="popup__header">
+        <div className="popup__brand">
+          <span className="popup__logo" aria-hidden>
+            <ShieldIcon size={18} strokeWidth={2.2} />
+          </span>
           <div>
-            <h1 className="font-semibold text-gray-900">PrivateSight</h1>
-            <div className="text-xs text-gray-500">Privacy-preserving vision agent</div>
+            <div className="popup__title">Veil</div>
+            <div className="popup__subtitle">Private vision for AI agents</div>
           </div>
         </div>
-        <button
-          onClick={handleClearSession}
-          className="text-xs text-red-600 hover:text-red-800 font-medium"
-          title="Emergency: Disable agent and clear session"
-        >
-          Emergency Stop
-        </button>
-      </div>
+        <StatusPill tone={overallTone}>{overallLabel}</StatusPill>
+      </header>
 
-      <div className="p-4 space-y-4">
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={active}
-              onChange={(e) => setActive(e.target.checked)}
-              className="w-4 h-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-            />
-            <span className="text-sm font-medium">Agent Active</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer ml-4">
-            <input
-              type="checkbox"
-              checked={serverConnected}
-              onChange={(e) => handleServerUrlChange(e.target.checked ? serverUrl : "")}
-              className="w-4 h-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-              disabled={loading}
-            />
-            <span className="text-sm font-medium">Server</span>
-          </label>
+      <div className="popup__body">
+        {/* Toggles */}
+        <div className="toggle-row">
+          <ToggleCard
+            active={active}
+            onToggle={() => setActive((v) => !v)}
+            icon={<EyeOffIcon size={15} />}
+            title="Agent"
+            hint={active ? "Privacy redaction on" : "Paused"}
+          />
+          <ToggleCard
+            active={serverConnected}
+            onToggle={() =>
+              handleServerUrlChange(serverConnected ? "" : serverUrl)
+            }
+            icon={<ServerIcon size={15} />}
+            title="Server"
+            hint={serverConnected ? "Connected" : "Offline"}
+            disabled={loading}
+          />
         </div>
 
+        {/* Server URL */}
         {serverConnected && (
-          <div className="flex gap-2">
+          <div className="server-row">
             <input
               type="url"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
               onBlur={(e) => handleServerUrlChange(e.target.value)}
               placeholder="Server URL"
-              className="flex-1 px-2 py-1 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-teal-500"
+              className="input"
               disabled={loading}
+              spellCheck={false}
+              autoComplete="off"
             />
-            <span className="px-2 py-1 text-xs bg-green-100 text-green-700 rounded">Connected</span>
+            <span className="status status--ok" title="Connected">
+              <span className="status__dot" />
+              Live
+            </span>
           </div>
         )}
 
-        <div className="grid grid-cols-3 gap-2">
-          <MetricCard label="Backend" value={privacyStatus?.backend ?? "—"} />
-          <MetricCard label="Redacted" value={redactedCount} />
-          <MetricCard label="Payload" value={`${Math.round(payloadSize / 1024)}`} unit="KB" />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">User Goal</label>
-          <textarea
-            value={userGoal}
-            onChange={(e) => setUserGoal(e.target.value)}
-            placeholder="e.g., Find the submit button and prepare the form"
-            rows={2}
-            className="w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-teal-500"
-            disabled={loading}
+        {/* Metrics */}
+        <div className="metrics">
+          <MetricCard label="Backend" value={backend} accent />
+          <MetricCard
+            label="Redacted"
+            value={redactedCount}
+            unit={redactedCount === 1 ? "item" : "items"}
+          />
+          <MetricCard
+            label="Payload"
+            value={payloadSize > 0 ? payloadKb : 0}
+            unit="KB"
           />
         </div>
 
+        {/* Goal */}
+        <div className="field">
+          <label className="field__label" htmlFor="user-goal">
+            <TargetIcon size={13} strokeWidth={2} />
+            User goal
+          </label>
+          <textarea
+            id="user-goal"
+            value={userGoal}
+            onChange={(e) => setUserGoal(e.target.value)}
+            placeholder="e.g. Find the submit button and prepare the form"
+            rows={2}
+            className="textarea"
+            disabled={loading}
+          />
+          <span className="field__hint">
+            Stays on-device. Only sanitized output reaches the server.
+          </span>
+        </div>
+
+        {/* Action */}
         <button
           onClick={handleCapture}
           disabled={loading || !active || !userGoal.trim() || !serverConnected}
-          className="w-full py-2 px-4 bg-teal-600 text-white rounded-lg font-medium hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="btn btn--primary btn--block"
         >
-          {loading ? "Processing..." : "Analyze & Plan"}
+          {loading ? (
+            <>
+              <span className="spinner" />
+              Analyzing page…
+            </>
+          ) : (
+            <>
+              <SparkleIcon size={14} strokeWidth={2.2} />
+              Analyze &amp; plan
+            </>
+          )}
         </button>
 
+        {/* Error */}
         {error && (
-          <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
+          <div className="alert alert--error" role="alert">
+            <span className="alert__icon">
+              <AlertIcon size={14} strokeWidth={2} />
+            </span>
+            <span>{error}</span>
           </div>
         )}
 
+        {/* Server plan */}
         {serverPlan && (
-          <div className="border-t pt-4">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-medium text-gray-900">Server Plan</h3>
-              <span className={`text-xs px-2 py-0.5 rounded ${
-                serverPlan.requiresUserConfirmation ? "bg-yellow-100 text-yellow-700" : "bg-green-100 text-green-700"
-              }`}>
-                {serverPlan.requiresUserConfirmation ? "Confirmation Required" : "Auto-executable"}
-              </span>
+          <div className="popup__section">
+            <div className="popup__divider" />
+            <div className="plan-header">
+              <div className="plan-header__title">
+                <SparkleIcon size={13} strokeWidth={2} />
+                AI action plan
+              </div>
+              <StatusPill
+                tone={serverPlan.requiresUserConfirmation ? "warn" : "ok"}
+              >
+                {serverPlan.requiresUserConfirmation
+                  ? `${pendingActionCount} to confirm`
+                  : "Auto-executable"}
+              </StatusPill>
             </div>
-            <div className="text-sm text-gray-600 mb-3">{serverPlan.summary}</div>
-            <div className="space-y-2 max-h-60 overflow-y-auto">
-              {validatedActions.map((action, index) => (
-                <ServerActionItem
-                  key={action.action.id}
-                  action={action}
-                  index={index}
-                  onConfirm={handleConfirmAction}
-                  onReject={handleRejectAction}
-                />
-              ))}
+            <div className="plan-summary">{serverPlan.summary}</div>
+            <div className="actions">
+              {validatedActions.length === 0 ? (
+                <div className="empty">No actions proposed.</div>
+              ) : (
+                validatedActions.map((action, index) => (
+                  <ServerActionItem
+                    key={action.action.id}
+                    action={action}
+                    index={index}
+                    onConfirm={handleConfirmAction}
+                    onReject={handleRejectAction}
+                  />
+                ))
+              )}
             </div>
           </div>
         )}
 
-        {lastPayload && lastPayload.redactionManifest && (
-          <details className="border-t pt-4">
-            <summary className="cursor-pointer text-sm font-medium text-gray-700">Redaction Manifest ({redactedCount})</summary>
-            <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+        {/* Manifest */}
+        {lastPayload && lastPayload.redactionManifest && lastPayload.redactionManifest.length > 0 && (
+          <details
+            className="disclosure"
+            open={showManifest}
+            onToggle={(e) => setShowManifest((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="disclosure__summary">
+              <span className="disclosure__summary-left">
+                <EyeOffIcon size={13} />
+                Redaction manifest
+                <span className="disclosure__count">{redactedCount}</span>
+              </span>
+              <span className="disclosure__chevron">
+                <ChevronIcon size={14} />
+              </span>
+            </summary>
+            <div className="disclosure__content">
               {lastPayload.redactionManifest.map((entry, i) => {
                 if (!entry.bounds) return null;
                 return (
-                  <div key={i} className="text-xs font-mono text-gray-600 bg-gray-50 p-2 rounded">
-                    <span className="font-medium text-teal-700">{entry.category}</span>{" "}
-                    <span className="text-gray-500">@</span>
-                    <span>({Math.round(entry.bounds.x)},{Math.round(entry.bounds.y)})</span>{" "}
-                    <span className="text-gray-500">{Math.round((entry.confidence ?? 0) * 100)}%</span> →{" "}
-                    <span className="text-red-600">{entry.replacement}</span>
+                  <div key={i} className="manifest-row">
+                    <span className="manifest-row__category">{entry.category}</span>
+                    <span className="manifest-row__bounds">
+                      ({Math.round(entry.bounds.x)},{Math.round(entry.bounds.y)})
+                    </span>
+                    <span className="manifest-row__confidence">
+                      {Math.round((entry.confidence ?? 0) * 100)}%
+                    </span>
+                    <span className="manifest-row__arrow">→</span>
+                    <span className="manifest-row__replacement">
+                      {entry.replacement}
+                    </span>
                   </div>
                 );
               })}
@@ -371,34 +547,89 @@ const Popup: React.FC = () => {
           </details>
         )}
 
-        <details className="border-t pt-4">
-          <summary className="cursor-pointer text-sm font-medium text-gray-700">
-            Telemetry {showTelemetry ? "▲" : "▼"}
-          </summary>
-          {showTelemetry && (
-            <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-              {telemetry.slice().reverse().map((entry, i) => (
-                <div key={i} className="text-xs font-mono text-gray-600 bg-gray-50 p-2 rounded flex justify-between">
-                  <span>{entry.metric}</span>
-                  <span className="font-medium">{entry.value}</span>
-                </div>
-              ))}
+        {/* Telemetry */}
+        {telemetry.length > 0 && (
+          <details
+            className="disclosure"
+            open={showTelemetry}
+            onToggle={(e) => setShowTelemetry((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="disclosure__summary">
+              <span className="disclosure__summary-left">
+                <PulseIcon size={13} />
+                Telemetry
+                <span className="disclosure__count">{telemetry.length}</span>
+              </span>
+              <span className="disclosure__chevron">
+                <ChevronIcon size={14} />
+              </span>
+            </summary>
+            <div className="disclosure__content">
+              {telemetry
+                .slice()
+                .reverse()
+                .map((entry, i) => (
+                  <div key={i} className="telemetry-row">
+                    <span className="telemetry-row__metric">{entry.metric}</span>
+                    <span className="telemetry-row__value">{entry.value} ms</span>
+                  </div>
+                ))}
             </div>
-          )}
+          </details>
+        )}
+
+        {/* Settings */}
+        <details
+          className="disclosure"
+          open={showSettings}
+          onToggle={(e) => setShowSettings((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="disclosure__summary">
+            <span className="disclosure__summary-left">
+              <SettingsIcon size={13} />
+              Settings &amp; safety
+            </span>
+            <span className="disclosure__chevron">
+              <ChevronIcon size={14} />
+            </span>
+          </summary>
+          <div className="disclosure__content" style={{ padding: "10px 12px" }}>
+            <div
+              className="alert alert--info"
+              style={{ marginBottom: 0 }}
+              role="note"
+            >
+              <span className="alert__icon">
+                <InfoIcon size={13} strokeWidth={2} />
+              </span>
+              <span>
+                Raw screenshots, form values, and URLs never leave this device.
+                Only the redacted page map, redaction manifest, and goal text
+                are sent to the configured server.
+              </span>
+            </div>
+          </div>
         </details>
 
-        <button
-          onClick={() => setShowTelemetry(!showTelemetry)}
-          className="text-xs text-teal-600 hover:text-teal-800"
-        >
-          {showTelemetry ? "Hide" : "Show"} Telemetry
-        </button>
+        {/* Footer */}
+        <div className="popup__footer">
+          <span className="popup__footer-meta">
+            <GaugeIcon size={11} />
+            {active ? "Privacy redaction active" : "Agent disabled"}
+          </span>
+          <button
+            onClick={handleClearSession}
+            className="btn btn--danger"
+            title="Clear session and redaction state"
+          >
+            <TrashIcon size={12} />
+            Emergency stop
+          </button>
+        </div>
       </div>
     </div>
   );
 };
 
-if (typeof document !== "undefined") {
-  const root = createRoot(document.getElementById("root")!);
-  root.render(<Popup />);
-}
+export default Popup;
+export { Popup };

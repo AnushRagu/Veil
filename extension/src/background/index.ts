@@ -26,6 +26,8 @@ const state = {
   rateLimits: new Map<string, RateLimitEntry>(),
   pendingRequests: new Map<string, AbortController>(),
   activeTabId: -1,
+  offscreenReady: false,
+  offscreenCreating: null as Promise<void> | null,
 };
 
 const ACTION_POLICY: Record<string, ActionPolicy> = {
@@ -206,10 +208,74 @@ function validatePlan(plan: ServerPlan, pageMapElements: any[]): ValidatedAction
   return (plan.actions ?? []).map((action) => validateAction(action, pageMapElements));
 }
 
+/* ------------------------------------------------------------------ *
+ * Offscreen document lifecycle                                        *
+ * ------------------------------------------------------------------ */
+
+const OFFSCREEN_DOC_PATH = "offscreen.html";
+const OFFSCREEN_REASONS = ["DOM_PARSER" as chrome.offscreen.Reason];
+
+async function hasOffscreenDocument(): Promise<boolean> {
+  // chrome.runtime.getContexts is the supported way to detect existing
+  // extension contexts (including offscreen documents) from the SW.
+  const contexts = await chrome.runtime.getContexts({
+    contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType],
+    documentUrls: [chrome.runtime.getURL(OFFSCREEN_DOC_PATH)],
+  });
+  return contexts.length > 0;
+}
+
+async function ensureOffscreenDocument(): Promise<void> {
+  if (state.offscreenCreating) {
+    return state.offscreenCreating;
+  }
+  state.offscreenCreating = (async () => {
+    if (await hasOffscreenDocument()) {
+      state.offscreenReady = true;
+      return;
+    }
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_DOC_PATH,
+      reasons: OFFSCREEN_REASONS,
+      justification:
+        "Run the ONNX Runtime Web vision pipeline inside an extension page so content scripts can use it via messaging.",
+    });
+    state.offscreenReady = true;
+  })().finally(() => {
+    state.offscreenCreating = null;
+  });
+  return state.offscreenCreating;
+}
+
+async function processVisionInOffscreen(message: any): Promise<any> {
+  await ensureOffscreenDocument();
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response ?? { ok: false, error: "No response from offscreen" });
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Message router                                                      *
+ * ------------------------------------------------------------------ */
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   (async () => {
     try {
       switch (message.type) {
+        case "VISION_PROCESS": {
+          // Sent by the content script. Forward to the offscreen document
+          // and return the result. Do not call sendResponse here at the
+          // outer level; the offscreen's response is what we propagate.
+          const result = await processVisionInOffscreen(message);
+          sendResponse(result);
+          break;
+        }
         case "SEND_TO_SERVER": {
           const payload = message.payload as ClientPayload;
           const plan = await sendToServer(payload);
@@ -264,7 +330,7 @@ chrome.tabs.onActivated.addListener((activeInfo) => {
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  console.log("[PrivateSight] Extension installed");
+  console.log("[Veil] Extension installed");
 });
 
-console.log("[PrivateSight] Background service worker started");
+console.log("[Veil] Background service worker started");

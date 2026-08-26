@@ -35,7 +35,7 @@ router.get("/health", (_req, res) => {
 });
 router.get("/info", (_req, res) => {
     res.json({
-        name: "PrivateSight Agent Server",
+        name: "Veil Agent Server",
         version: "0.1.0",
         planner: "rule-based",
         capabilities: [
