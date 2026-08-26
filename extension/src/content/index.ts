@@ -7,10 +7,104 @@ import {
   ClientPayload,
   ServerAction,
   ElementValidationResult,
+  calculatePrivacyLeakageRate,
+  calculateFalseNegativeRate,
+  calculateMinimizationEfficiencyRate,
 } from "@veil/shared";
 import { createVisionPipeline, VisionPipeline } from "../vision/visionPipeline";
 import { sanitizeString, getOrigin, generateSessionId } from "../utils/helpers";
 import { ContextMinimizer } from "../minimization/contextMinimizer";
+
+export interface PrivacyMetrics {
+  plr: number;
+  fnr: number;
+  mer: number;
+  sensitivePresent: number;
+  sensitiveRedacted: number;
+  sensitiveExposed: number;
+  totalElements: number;
+  irrelevantPruned: number;
+  irrelevantTotal: number;
+}
+
+/**
+ * Compute real PLR, FNR, and MER from the redaction pipeline results.
+ *
+ * PLR = sensitive elements still exposed (unredacted) / total sensitive present
+ * FNR = sensitive elements missed by redaction / total sensitive present
+ * MER = irrelevant elements pruned / total irrelevant elements
+ */
+function computePrivacyMetrics(
+  preRedactionElements: SanitizedElement[],
+  postRedactionElements: SanitizedElement[],
+  redactionManifest: RedactionManifest,
+  prunedCount: number,
+  totalOriginal: number
+): PrivacyMetrics {
+  const totalElements = preRedactionElements.length;
+
+  // Sensitive elements present before redaction (ground truth)
+  const sensitivePresent = preRedactionElements.filter((el) => el.sensitive).length;
+
+  // After redaction: elements whose labels still contain original sensitive text
+  // (not replaced with [REDACTED_*] tokens)
+  let sensitiveExposed = 0;
+  for (const el of postRedactionElements) {
+    if (!el.sensitive) continue;
+    const label = el.label || "";
+    // If label was NOT replaced with a redaction token, it leaked
+    if (!label.includes("[REDACTED") && !label.includes("[redacted")) {
+      sensitiveExposed++;
+    }
+  }
+
+  // Sensitive elements that WERE properly redacted (label replaced with token)
+  const sensitiveRedacted = sensitivePresent - sensitiveExposed;
+
+  // FNR: sensitive elements that the redaction engine completely missed
+  // (they exist in post-redaction output but weren't in the manifest at all)
+  const manifestElementIds = new Set(
+    redactionManifest.map((entry) => {
+      // Match manifest bounds to element bounds to find which were processed
+      return `${entry.bounds.x},${entry.bounds.y},${entry.bounds.width},${entry.bounds.height}`;
+    })
+  );
+  let unredactedSensitive = 0;
+  for (const el of postRedactionElements) {
+    if (!el.sensitive) continue;
+    const label = el.label || "";
+    if (label.includes("[REDACTED") || label.includes("[redacted")) continue;
+    // Check if this element's bounds appear in the manifest
+    if (el.bounds) {
+      const key = `${el.bounds.x},${el.bounds.y},${el.bounds.width},${el.bounds.height}`;
+      if (!manifestElementIds.has(key)) {
+        unredactedSensitive++;
+      }
+    } else {
+      unredactedSensitive++;
+    }
+  }
+
+  // Irrelevant elements = total - sensitive
+  const irrelevantTotal = Math.max(0, totalElements - sensitivePresent);
+  const irrelevantPruned = Math.min(prunedCount, irrelevantTotal);
+
+  const plr = calculatePrivacyLeakageRate(sensitiveExposed, sensitivePresent);
+  const fnr = calculateFalseNegativeRate(unredactedSensitive, sensitivePresent);
+  const mer = calculateMinimizationEfficiencyRate(irrelevantPruned, irrelevantTotal);
+
+  return {
+    plr,
+    fnr,
+    mer,
+    sensitivePresent,
+    sensitiveRedacted,
+    sensitiveExposed,
+    totalElements,
+    irrelevantPruned,
+    irrelevantTotal,
+  };
+}
 
 interface ContentScriptState {
   sessionId: string | null;
@@ -211,7 +305,7 @@ export function verifyElementBeforeExecution(action: ServerAction): ElementValid
   return { valid: true, element };
 }
 
-async function performCapture(userGoal: string): Promise<ClientPayload> {
+async function performCapture(userGoal: string): Promise<ClientPayload & { privacyMetrics: PrivacyMetrics }> {
   if (state.isCapturing) {
     throw new Error("Capture already in progress");
   }
@@ -227,22 +321,27 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
 
     const initialPageMap = buildPageMap(elementsToProcess, minimization.prunedCount);
 
-    // 3. Truthful Visual Perception
-    const canvas = await captureViewport();
-    state.lastScreenshot = canvas;
+    // 3. Visual Perception (optional — if vision pipeline fails, use DOM-only)
+    let visionResult: { redactionEntries: RedactionManifest } = { redactionEntries: [] };
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      canvas = await captureViewport();
+      state.lastScreenshot = canvas;
 
-    if (!state.visionPipeline) {
-      state.visionPipeline = await initializeVisionPipeline();
+      if (!state.visionPipeline) {
+        state.visionPipeline = await initializeVisionPipeline();
+      }
+
+      visionResult = await state.visionPipeline.processFrame(canvas, []);
+    } catch (visionErr) {
+      console.warn("[VEIL] Vision pipeline unavailable, using DOM-only extraction:", visionErr);
     }
-
-    // Process frame through WASM ONNX SIMD vision layer
-    const visionResult = await state.visionPipeline.processFrame(canvas, []);
 
     // 4. Redaction Processing
     const redactionContext: RedactionContext = {
       elements: initialPageMap.elements,
-      screenshotWidth: canvas.width,
-      screenshotHeight: canvas.height,
+      screenshotWidth: canvas?.width || window.innerWidth || 800,
+      screenshotHeight: canvas?.height || window.innerHeight || 600,
     };
 
     const redactionResult = processRedaction(redactionContext);
@@ -264,24 +363,37 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
       return el;
     });
 
+    // Compute real privacy metrics from the pipeline
+    const privacyMetrics = computePrivacyMetrics(
+      elementsToProcess,
+      finalElements,
+      combinedManifest,
+      minimization.prunedCount,
+      allElements.length
+    );
+
     const finalPageMap = buildPageMap(finalElements, minimization.prunedCount);
 
     // 5. Apply Redactions + Minimization Masking to visual canvas
     let sanitizedScreenshot: string | undefined;
-    const redactedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
-    const ctx = redactedCanvas.getContext("2d");
-    if (ctx && canvas.width > 0 && canvas.height > 0) {
-      ctx.drawImage(canvas, 0, 0);
+    if (canvas) {
+      try {
+        const redactedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
+        const ctx = redactedCanvas.getContext("2d");
+        if (ctx && canvas.width > 0 && canvas.height > 0) {
+          ctx.drawImage(canvas, 0, 0);
+        }
+        applyRedactionsToCanvas(redactedCanvas, combinedManifest);
+        ContextMinimizer.applyMinimizationMasksToCanvas(redactedCanvas, minimization.peripheralMasks);
+        sanitizedScreenshot = redactedCanvas.toDataURL("image/jpeg", 0.7);
+      } catch { /* screenshot optional */ }
     }
-    applyRedactionsToCanvas(redactedCanvas, combinedManifest);
-    ContextMinimizer.applyMinimizationMasksToCanvas(redactedCanvas, minimization.peripheralMasks);
-    sanitizedScreenshot = redactedCanvas.toDataURL("image/jpeg", 0.7);
 
     state.pageMap = finalPageMap;
     state.lastRedactionManifest = combinedManifest;
     state.sessionId = generateSessionId();
 
-    const payload: ClientPayload = {
+    const payload: ClientPayload & { privacyMetrics: PrivacyMetrics } = {
       sessionId: state.sessionId,
       timestamp: new Date().toISOString(),
       userGoal,
@@ -289,6 +401,7 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
       pageMap: finalPageMap,
       redactionManifest: combinedManifest,
       minimizationApplied: minimization.prunedCount > 0,
+      privacyMetrics,
     };
 
     return payload;
@@ -353,6 +466,21 @@ async function executeAction(action: ServerAction): Promise<{ success: boolean; 
           element.value = value ?? "";
           element.dispatchEvent(new Event("input", { bubbles: true }));
           element.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        break;
+      case "select":
+        if (element instanceof HTMLSelectElement && value) {
+          const option = Array.from(element.options).find(
+            (opt) => opt.value === value || opt.textContent?.trim().toLowerCase() === value.toLowerCase()
+          );
+          if (option) {
+            element.value = option.value;
+            element.dispatchEvent(new Event("change", { bubbles: true }));
+          } else {
+            return { success: false, error: `Option "${value}" not found in select element` };
+          }
+        } else if (element instanceof HTMLSelectElement) {
+          return { success: false, error: "Select action requires a value to select" };
         }
         break;
       default:

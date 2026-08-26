@@ -14,7 +14,7 @@ export function getOrigin(url: string): string {
   try {
     return new URL(url).origin;
   } catch {
-    return "unknown";
+    return "extension://self";
   }
 }
 

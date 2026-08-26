@@ -1,27 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { copyFileSync, mkdirSync, existsSync } from "fs";
 import { resolve } from "path";
 
 export default defineConfig({
-  plugins: [
-    react(),
-    {
-      name: "copy-manifest",
-      writeBundle() {
-        const manifestPath = resolve(__dirname, "src/manifest.json");
-        const distPath = resolve(__dirname, "dist/manifest.json");
-        if (existsSync(manifestPath)) {
-          copyFileSync(manifestPath, distPath);
-        }
-        const publicDir = resolve(__dirname, "public");
-        const distPublicDir = resolve(__dirname, "dist/public");
-        if (existsSync(publicDir)) {
-          mkdirSync(distPublicDir, { recursive: true });
-        }
-      },
-    },
-  ],
+  base: "./",
+  plugins: [react()],
   resolve: {
     alias: {
       "@veil/shared": resolve(__dirname, "../shared/src/index.ts"),
@@ -30,12 +13,11 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    emptyOutDir: false,
     sourcemap: true,
     rollupOptions: {
       input: {
         popup: resolve(__dirname, "src/popup/index.html"),
-        background: resolve(__dirname, "src/background/index.ts"),
-        content: resolve(__dirname, "src/content/index.ts"),
       },
       output: {
         entryFileNames: "[name].js",

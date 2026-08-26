@@ -359,9 +359,18 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
       try {
+        // Messages that must be relayed to the content script on the active tab
+        const CONTENT_SCRIPT_RELAYS = [
+          "CAPTURE_AND_SEND",
+          "EXECUTE_ACTIONS",
+          "GET_PAGE_MAP",
+          "GET_PRIVACY_STATUS",
+          "CLEAR_SESSION",
+        ];
+
+        // Messages handled directly by the background
         switch (message.type) {
           case "CAPTURE_VISIBLE_TAB": {
-            // Phase 1: Grab real rendered page pixels using chrome.tabs.captureVisibleTab
             if (chrome.tabs?.captureVisibleTab) {
               chrome.tabs.captureVisibleTab(null, { format: "png" }, (dataUrl) => {
                 if (chrome.runtime.lastError || !dataUrl) {
@@ -373,13 +382,18 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             } else {
               sendResponse({ success: false, error: "tabs.captureVisibleTab API not available" });
             }
-            break;
+            return; // async response handled above
           }
           case "SEND_TO_SERVER": {
-            const payload = message.payload as ClientPayload;
+            const payload = message.payload as ClientPayload & { privacyMetrics?: any };
             const plan = await sendToServer(payload);
             const validated = plan ? validatePlan(plan, message.pageMapElements ?? []) : [];
-            sendResponse({ success: true, plan, validatedActions: validated });
+            sendResponse({
+              success: true,
+              plan,
+              validatedActions: validated,
+              privacyMetrics: payload?.privacyMetrics ?? null,
+            });
             break;
           }
           case "UPDATE_SERVER_CONFIG": {
@@ -414,8 +428,53 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             sendResponse({ success: true });
             break;
           }
-          default:
-            sendResponse({ success: false, error: "Unknown message type" });
+          default: {
+            // Relay all other messages to the active tab's content script
+            if (CONTENT_SCRIPT_RELAYS.includes(message.type)) {
+              // Always resolve the active tab first
+              if (state.activeTabId === -1) {
+                const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (tabs[0]?.id) {
+                  state.activeTabId = tabs[0].id;
+                } else {
+                  sendResponse({ success: false, error: "No active tab found" });
+                  break;
+                }
+              }
+              // Ensure we don't target chrome:// or extension pages
+              const tab = await chrome.tabs.get(state.activeTabId);
+              if (!tab.url || tab.url.startsWith("chrome://") || tab.url.startsWith("chrome-extension://")) {
+                sendResponse({ success: false, error: "Cannot run on this page" });
+                break;
+              }
+              const targetTabId = state.activeTabId!;
+
+              // Try sending first; if content script is missing, inject it and retry
+              try {
+                const response = await chrome.tabs.sendMessage(targetTabId, message);
+                sendResponse(response);
+              } catch {
+                // Content script not loaded yet — inject it
+                try {
+                  await chrome.scripting.executeScript({
+                    target: { tabId: targetTabId, allFrames: true },
+                    files: ["content.js"],
+                  });
+                  // Small delay for script to initialise
+                  await new Promise((r) => setTimeout(r, 150));
+                  const response = await chrome.tabs.sendMessage(targetTabId, message);
+                  sendResponse(response);
+                } catch (injectErr) {
+                  sendResponse({
+                    success: false,
+                    error: `Content script could not be injected: ${injectErr instanceof Error ? injectErr.message : "Unknown error"}`,
+                  });
+                }
+              }
+              break;
+            }
+            sendResponse({ success: false, error: `Unknown message type: ${message.type}` });
+          }
         }
       } catch (error) {
         sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" });

@@ -49,7 +49,7 @@ export const SanitizedElementSchema = z.object({
     isPrunedByMinimization: z.boolean().optional(),
 });
 export const PageMapSchema = z.object({
-    urlOrigin: z.string().url(),
+    urlOrigin: z.string().min(1),
     title: z.string(),
     viewport: z.object({
         width: z.number().positive(),
