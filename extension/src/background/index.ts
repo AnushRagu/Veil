@@ -125,7 +125,7 @@ function validateActionLocally(
     }
 
     // Check if element is sensitive
-    if (targetElement.sensitive) {
+    if (targetElement.sensitive && action.type !== "fill_private") {
       return {
         valid: false,
         reason: `Target element ${action.target.elementId} is sensitive and cannot be acted upon directly.`,
@@ -305,6 +305,15 @@ async function executeAgentStep(
 ): Promise<{ success: boolean; error?: string; stepResult?: any }> {
   const { agentExecution } = state;
   const { plan, currentStep, steps, classification, pageTracker } = agentExecution;
+
+  console.log(`[VEIL][BACKGROUND] executeAgentStep: step ${currentStep + 1}/${plan?.actions.length}`);
+
+  if (!plan || currentStep >= plan.actions.length || currentStep >= agentExecution.maxSteps) {
+    agentExecution.status = "completed";
+    agentExecution.isExecuting = false;
+    return { success: true };
+  }
+  // ...
 
   if (!plan || currentStep >= plan.actions.length || currentStep >= agentExecution.maxSteps) {
     agentExecution.status = "completed";

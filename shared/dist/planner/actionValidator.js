@@ -8,9 +8,13 @@ function extractNonStopWords(text) {
 export function findMatchingPageElement(target, pageElements) {
     if (!target)
         return undefined;
+    console.log(`[MATCH] Searching for target: ${JSON.stringify(target)} in ${pageElements.length} elements`);
     // 1. Stable observation element ID (matching el.id directly)
     if (target.elementId) {
-        const byObsId = pageElements.find((el) => el.id === target.elementId);
+        const byObsId = pageElements.find((el) => {
+            console.log(`[MATCH] Checking el.id ${el.id} against ${target.elementId}`);
+            return el.id === target.elementId;
+        });
         if (byObsId)
             return byObsId;
     }

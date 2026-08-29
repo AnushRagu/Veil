@@ -499,7 +499,8 @@
     pageMap: null,
     lastScreenshot: null,
     lastRedactionManifest: [],
-    isCapturing: false
+    isCapturing: false,
+    privateValues: /* @__PURE__ */ new Map()
   };
   function buildPageMap(elements) {
     return {
@@ -570,6 +571,15 @@
     state.isCapturing = true;
     try {
       const elements = extractSanitizedElements(document);
+      state.privateValues.clear();
+      elements.forEach((el) => {
+        if (el.sensitive) {
+          const realEl = resolveTargetElement(el);
+          if (realEl && (realEl instanceof HTMLInputElement || realEl instanceof HTMLTextAreaElement)) {
+            state.privateValues.set(el.id, realEl.value);
+          }
+        }
+      });
       const pageMap = buildPageMap(elements);
       const canvas = await captureViewport();
       state.lastScreenshot = canvas;
@@ -899,6 +909,25 @@
           }
           return { success: false, error: "Target element is not an editable field", verified: false };
         }
+        case "fill_private": {
+          const sanitizedEl = state.pageMap?.elements.find(
+            (el) => resolveTargetElement(el) === element
+          );
+          if (!sanitizedEl || !sanitizedEl.sensitive) {
+            return { success: false, error: "fill_private can only be used on sensitive fields", verified: false };
+          }
+          const privateValue = state.privateValues.get(sanitizedEl.id);
+          if (!privateValue) {
+            return { success: false, error: "No local private value found for this field", verified: false };
+          }
+          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+            element.focus();
+            setInputValueSafely(element, privateValue);
+            const verified = element.value === privateValue;
+            return { success: true, verified, details: { filledPrivateValue: true } };
+          }
+          return { success: false, error: "Target element is not an editable field", verified: false };
+        }
         case "select": {
           if (element instanceof HTMLSelectElement) {
             const option = Array.from(element.options).find(
@@ -940,10 +969,16 @@
       style.id = "ps-highlight-style";
       style.textContent = `
       [data-ps-highlight] {
-        outline: 3px solid #00d4aa !important;
+        outline: 3px solid #0d9488 !important;
         outline-offset: 3px !important;
-        box-shadow: 0 0 0 6px rgba(0, 212, 170, 0.35) !important;
+        box-shadow: 0 0 0 6px rgba(13, 148, 136, 0.3) !important;
         transition: outline 0.2s ease, box-shadow 0.2s ease !important;
+        animation: ps-pulse 2s infinite;
+      }
+      @keyframes ps-pulse {
+        0% { box-shadow: 0 0 0 0px rgba(13, 148, 136, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(13, 148, 136, 0); }
+        100% { box-shadow: 0 0 0 0px rgba(13, 148, 136, 0); }
       }
     `;
       document.head.appendChild(style);
@@ -984,7 +1019,6 @@
       }
     }
   }
-  var mutationObserver = null;
   function setupMutationObserver() {
     if (mutationObserver) return;
     mutationObserver = new MutationObserver(() => {
@@ -998,10 +1032,20 @@
       subtree: true
     });
   }
+  var mutationObserver = null;
   setupMutationObserver();
   function initialObserve() {
     try {
       const elements = extractSanitizedElements(document);
+      state.privateValues.clear();
+      elements.forEach((el) => {
+        if (el.sensitive) {
+          const realEl = resolveTargetElement(el);
+          if (realEl && (realEl instanceof HTMLInputElement || realEl instanceof HTMLTextAreaElement)) {
+            state.privateValues.set(el.id, realEl.value);
+          }
+        }
+      });
       const pageMap = buildPageMap(elements);
       assignElementIds(elements);
       const redactionContext = {
@@ -1018,6 +1062,72 @@
     }
   }
   initialObserve();
+  function createStatusOverlay() {
+    if (document.getElementById("veil-status-overlay")) return;
+    const overlay = document.createElement("div");
+    overlay.id = "veil-status-overlay";
+    Object.assign(overlay.style, {
+      position: "fixed",
+      top: "20px",
+      right: "20px",
+      zIndex: "2147483647",
+      padding: "12px 16px",
+      backgroundColor: "rgba(15, 23, 42, 0.9)",
+      color: "#fff",
+      borderRadius: "12px",
+      fontSize: "13px",
+      fontWeight: "500",
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+      boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
+      backdropFilter: "blur(8px)",
+      border: "1px solid rgba(255, 255, 255, 0.1)",
+      display: "flex",
+      alignItems: "center",
+      gap: "12px",
+      transition: "all 0.3s ease",
+      pointerEvents: "auto"
+    });
+    const icon = document.createElement("div");
+    icon.innerHTML = "\u{1F6E1}\uFE0F";
+    icon.style.fontSize = "16px";
+    const content = document.createElement("div");
+    content.id = "veil-status-content";
+    content.textContent = "Veil is ready";
+    content.style.marginRight = "12px";
+    const stopBtn = document.createElement("button");
+    stopBtn.textContent = "Stop";
+    Object.assign(stopBtn.style, {
+      padding: "4px 8px",
+      backgroundColor: "#ef4444",
+      color: "#fff",
+      border: "none",
+      borderRadius: "6px",
+      fontSize: "11px",
+      fontWeight: "600",
+      cursor: "pointer",
+      transition: "background 0.2s ease"
+    });
+    stopBtn.onmouseover = () => stopBtn.style.backgroundColor = "#dc2626";
+    stopBtn.onmouseout = () => stopBtn.style.backgroundColor = "#ef4444";
+    stopBtn.onclick = () => {
+      chrome.runtime.sendMessage({ type: "EMERGENCY_STOP" });
+    };
+    overlay.appendChild(icon);
+    overlay.appendChild(content);
+    overlay.appendChild(stopBtn);
+    document.body.appendChild(overlay);
+  }
+  function updateStatusOverlay(status, goal) {
+    const overlay = document.getElementById("veil-status-overlay");
+    const content = document.getElementById("veil-status-content");
+    if (!overlay || !content) return;
+    overlay.style.display = "flex";
+    content.textContent = goal ? `Veil: ${status} (Goal: ${goal})` : `Veil: ${status}`;
+  }
+  function hideStatusOverlay() {
+    const overlay = document.getElementById("veil-status-overlay");
+    if (overlay) overlay.style.display = "none";
+  }
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (!message || typeof message !== "object") return false;
     (async () => {
@@ -1031,6 +1141,8 @@
           case "OBSERVE": {
             console.log(`[VEIL][CONTENT] received OBSERVE for goal: "${message.userGoal || ""}"`);
             console.log(`[VEIL][CONTENT] redaction started`);
+            createStatusOverlay();
+            updateStatusOverlay("Analyzing page...", message.userGoal);
             const payload = await performCapture(message.userGoal || "");
             assignElementIds(payload.pageMap.elements);
             console.log(`[VEIL][CONTENT] redaction complete: ${payload.redactionManifest.length} items`);
@@ -1038,14 +1150,18 @@
             break;
           }
           case "EXECUTE_ACTIONS": {
+            createStatusOverlay();
             const results = [];
-            for (const action of message.actions ?? []) {
+            for (let i = 0; i < (message.actions ?? []).length; i++) {
+              const action = message.actions[i];
               const targetDesc = action.target?.elementId || action.target?.selector || action.type;
+              updateStatusOverlay(`Executing step ${i + 1}/${message.actions.length}...`);
               console.log(`[VEIL][CONTENT] executing action: ${action.type} on ${targetDesc}`);
               const result = await executeAction(action);
               console.log(`[VEIL][CONTENT] action verified: ${result.verified ? "success" : "unverified"} (${result.error || "no error"})`);
               results.push({ actionId: action.id, ...result });
             }
+            hideStatusOverlay();
             sendResponse({ success: true, results });
             break;
           }
@@ -1068,6 +1184,7 @@
           case "EMERGENCY_STOP": {
             console.log("[VEIL][CONTENT] clearing highlights");
             clearAllHighlights();
+            hideStatusOverlay();
             sendResponse({ success: true });
             break;
           }
@@ -1092,7 +1209,12 @@
             state.pageMap = null;
             state.lastScreenshot = null;
             state.lastRedactionManifest = [];
+            hideStatusOverlay();
             sendResponse({ success: true });
+            break;
+          }
+          case "UPDATE_OVERLAY": {
+            updateStatusOverlay(message.status, message.goal);
             break;
           }
           default:

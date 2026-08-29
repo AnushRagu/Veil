@@ -6,47 +6,47 @@
   <title>Veil Demo Page</title>
   <style>
     * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; line-height: 1.6; background: #fafafa; }
-    .container { background: white; border-radius: 12px; padding: 32px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    h1 { color: #1a1a1a; margin-bottom: 8px; }
-    .subtitle { color: #666; margin-bottom: 32px; }
-    .section { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #eee; }
+    body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 24px; line-height: 1.6; background: #f8fafc; color: #0f172a; }
+    .container { background: white; border-radius: 16px; padding: 32px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); border: 1px solid #e2e8f0; }
+    h1 { color: #0f172a; margin-bottom: 8px; font-weight: 800; letter-spacing: -0.02em; }
+    .subtitle { color: #64748b; margin-bottom: 32px; font-size: 1.1rem; }
+    .section { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid #f1f5f9; }
     .section:last-child { border-bottom: none; }
-    h2 { color: #333; font-size: 1.25rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-    .badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; }
+    h2 { color: #1e293b; font-size: 1.25rem; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; font-weight: 700; }
+    .badge { font-size: 0.7rem; padding: 2px 8px; border-radius: 999px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
     .badge-sensitive { background: #fee2e2; color: #dc2626; }
     .badge-safe { background: #dcfce7; color: #16a34a; }
     .form-group { margin-bottom: 20px; }
-    label { display: block; font-weight: 500; margin-bottom: 6px; color: #333; }
-    input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 1rem; font-family: inherit; transition: border-color 0.2s, box-shadow 0.2s; }
+    label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; font-size: 0.9rem; }
+    input, textarea, select { width: 100%; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 1rem; font-family: inherit; transition: all 0.2s ease; }
     input:focus, textarea:focus, select:focus { outline: none; border-color: #0d9488; box-shadow: 0 0 0 3px rgba(13,148,136,0.1); }
     input[type="password"] { font-family: monospace; }
     .profile-section { display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap; }
-    .profile-image { width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(135deg, #0d9488, #14b8a6); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem; flex-shrink: 0; }
-    .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .profile-image { width: 120px; height: 120px; border-radius: 50%; background: linear-gradient(135deg, #0d9488, #14b8a6); display: flex; align-items: center; justify-content: center; color: white; font-size: 3rem; flex-shrink: 0; box-shadow: 0 4px 12px rgba(13,148,136,0.2); }
+    .btn { padding: 12px 24px; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: all 0.2s ease; }
     .btn-primary { background: #0d9488; color: white; }
-    .btn-primary:hover { background: #0f766e; }
-    .btn-secondary { background: #e5e7eb; color: #374151; }
-    .btn-secondary:hover { background: #d1d5db; }
-    .btn-danger { background: #dc2626; color: white; }
-    .btn-danger:hover { background: #b91c1c; }
+    .btn-primary:hover { background: #0f766e; transform: translateY(-1px); }
+    .btn-secondary { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+    .btn-secondary:hover { background: #e2e8f0; }
+    .btn-danger { background: #ef4444; color: white; }
+    .btn-danger:hover { background: #dc2626; transform: translateY(-1px); }
     .row { display: flex; gap: 16px; flex-wrap: wrap; }
     .row > .form-group { flex: 1; min-width: 200px; }
-    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 8px; padding: 16px; margin-top: 16px; font-size: 0.875rem; color: #064e3b; }
+    .info-box { background: #f0fdfa; border: 1px solid #99f6e4; border-radius: 12px; padding: 16px; margin-top: 16px; font-size: 0.875rem; color: #064e3b; }
     .info-box.warning { background: #fef3c7; border-color: #fcd34d; color: #92400e; }
     .info-box.danger { background: #fee2e2; border-color: #fecaca; color: #991b1b; }
-    .code { font-family: monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 0.875rem; }
+    .code { font-family: 'JetBrains Mono', monospace; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.875rem; color: #475569; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px; }
-    .field-hint { font-size: 0.75rem; color: #6b7280; margin-top: 4px; }
+    .field-hint { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Veil Demo Page</h1>
-    <p class="subtitle">Test page with various sensitive and non-sensitive fields for privacy-preserving vision agent testing</p>
+    <p class="subtitle">Professional test page for privacy-preserving vision agent verification</p>
 
     <div class="info-box">
-      <strong>Instructions:</strong> Open the Veil extension popup, enter a goal like "Find the submit button and prepare the form", and click "Analyze & Plan". The extension will detect and redact sensitive information before sending context to the server.
+      <strong>Quick Start:</strong> Open the Veil extension popup and try a quick action like <strong>"Analyze Privacy"</strong>. You will see a professional status overlay in the top-right corner and pulsing teal highlights on the page.
     </div>
 
     <div class="section">
@@ -69,6 +69,22 @@
             <input type="tel" id="phone" placeholder="+1 (555) 123-4567" value="+1 (555) 123-4567" autocomplete="tel" data-sensitive="true">
             <div class="field-hint">Marked sensitive - will be redacted as <code>[REDACTED_PHONE]</code></div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Private Actions Testing <span class="badge badge-sensitive">New Feature</span></h2>
+      <div class="info-box">
+        <strong>🔒 Private Action Capability:</strong> Veil can now perform <code>fill_private</code> actions. This allows the AI to request that a sensitive field be filled using a local secret without the server ever seeing that secret.
+        <br><br>
+        <strong>Try this goal:</strong> <code class="code">"Fill the password field using my local secret"</code>
+      </div>
+      <div class="row">
+        <div class="form-group">
+          <label for="privateSecret">Local Secret Field</label>
+          <input type="password" id="privateSecret" placeholder="••••••••" value="LocalSecret123!" autocomplete="current-password" data-private="true">
+          <div class="field-hint">This field is completely private. Veil uses a local-only mapping to fill this.</div>
         </div>
       </div>
     </div>
@@ -177,18 +193,17 @@
     </div>
 
     <div class="info-box warning">
-      <strong>⚠ Test Scenarios:</strong>
+      <strong>⚠ Recommended Test Scenarios:</strong>
       <ul style="margin: 8px 0 0; padding-left: 20px;">
-        <li>Goal: "Find the submit button and prepare the form" → Should highlight Submit Request button</li>
-        <li>Goal: "Search for electronics" → Should highlight search input and select Electronics</li>
-        <li>Goal: "Fill in my name" → Should highlight name field (safe)</li>
-        <li>Goal: "Submit the form" → Should require confirmation (destructive action)</li>
-        <li>Goal: "Delete my account" → Should be blocked or require explicit confirmation</li>
+        <li><strong>Quick Action:</strong> "Analyze Privacy" → Observe the on-page overlay and redaction results.</li>
+        <li><strong>Task:</strong> "Find the submit button and prepare the form" → Watch for pulsing teal highlights.</li>
+        <li><strong>Interaction:</strong> "Search for electronics" → See the agent interact with search and category select.</li>
+        <li><strong>Security:</strong> "Delete my account" → Verify high-risk confirmation in the popup.</li>
       </ul>
     </div>
 
     <div class="info-box danger">
-      <strong>🔒 Privacy Note:</strong> All fields marked with <code>data-sensitive</code>, <code>data-private</code>, password inputs, and autocomplete attributes will be detected and redacted locally before any data leaves your browser. The server only receives sanitized structural context.
+      <strong>🔒 Privacy Note:</strong> All fields marked with <code data-sensitive>data-sensitive</code>, <code data-private>data-private</code>, password inputs, and autocomplete attributes are redacted locally. The server only receives sanitized structural context.
     </div>
   </div>
 
@@ -205,15 +220,12 @@
 
     document.getElementById('submitBtn').addEventListener('click', () => {
       showFeedback('✓ Request submitted successfully', 'success');
-      console.log('[Demo] Form submitted successfully');
     });
     document.getElementById('cancelBtn').addEventListener('click', () => {
       showFeedback('⚠ Action cancelled', 'warning');
-      console.log('[Demo] Action cancelled');
     });
     document.getElementById('deleteBtn').addEventListener('click', () => {
       showFeedback('🛑 Delete requested - account marked for deletion', 'danger');
-      console.log('[Demo] Delete requested');
     });
   </script>
 </body>

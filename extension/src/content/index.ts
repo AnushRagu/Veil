@@ -14,6 +14,7 @@ interface ContentScriptState {
   lastScreenshot: HTMLCanvasElement | null;
   lastRedactionManifest: RedactionManifest;
   isCapturing: boolean;
+  privateValues: Map<string, string>;
 }
 
 const state: ContentScriptState = {
@@ -22,6 +23,7 @@ const state: ContentScriptState = {
   lastScreenshot: null,
   lastRedactionManifest: [],
   isCapturing: false,
+  privateValues: new Map(),
 };
 
 function buildPageMap(elements: SanitizedElement[]): PageMap {
@@ -117,13 +119,23 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
 
   try {
     const elements = extractSanitizedElements(document);
+
+    // Capture private values locally before they are sanitized further
+    state.privateValues.clear();
+    elements.forEach((el) => {
+      if (el.sensitive) {
+        const realEl = resolveTargetElement(el);
+        if (realEl && (realEl instanceof HTMLInputElement || realEl instanceof HTMLTextAreaElement)) {
+          state.privateValues.set(el.id, realEl.value);
+        }
+      }
+    });
+
     const pageMap = buildPageMap(elements);
 
     const canvas = await captureViewport();
     state.lastScreenshot = canvas;
 
-    // Run DOM-based redaction locally. This produces a redaction manifest
-    // (without vision-based entries) and a sanitized element list.
     const redactionContext: RedactionContext = {
       elements: pageMap.elements,
       screenshotWidth: canvas.width,
@@ -133,9 +145,6 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
     const redactionResult = processRedaction(redactionContext);
     const localManifest = redactionResult.manifest;
 
-    // Hand the screenshot off to the offscreen vision pipeline through the
-    // background service worker. The content script never touches ONNX or
-    // any module that uses import.meta.
     const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
     const visionResponse = await requestVisionProcessing(
       dataUrl,
@@ -167,8 +176,6 @@ async function performCapture(userGoal: string): Promise<ClientPayload> {
 
     const finalPageMap = buildPageMap(finalElements);
 
-    // Apply all redactions (DOM + vision) to a clone of the screenshot so
-    // the only image data leaving the device is fully redacted.
     const sanitizedCanvas = canvas.cloneNode(true) as HTMLCanvasElement;
     applyRedactionsToCanvas(sanitizedCanvas, combinedManifest);
     const sanitizedScreenshot = sanitizedCanvas.toDataURL("image/jpeg", 0.7);
@@ -219,25 +226,21 @@ function applyRedactionsToCanvas(canvas: HTMLCanvasElement, manifest: RedactionM
 function resolveTargetElement(target: any): Element | null {
   if (!target) return null;
 
-  // 1. Live DOM tracking ID if available (data-ps-id / data-veil-id)
   if (target.elementId) {
     const byPsId = document.querySelector(`[data-ps-id="${target.elementId}"], [data-veil-id="${target.elementId}"]`);
     if (byPsId) return byPsId;
   }
 
-  // 2. data-veil-id specifically
   if (target.elementId) {
     const byVeilId = document.querySelector(`[data-veil-id="${target.elementId}"]`);
     if (byVeilId) return byVeilId;
   }
 
-  // 3. DOM id attribute
   if (target.elementId) {
     const byId = document.getElementById(target.elementId);
     if (byId) return byId;
   }
 
-  // 4. CSS selector
   if (target.selector) {
     try {
       const bySelector = document.querySelector(target.selector);
@@ -245,7 +248,6 @@ function resolveTargetElement(target: any): Element | null {
     } catch {}
   }
 
-  // 5. XPath
   if (target.xpath) {
     try {
       const result = document.evaluate(target.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
@@ -255,7 +257,6 @@ function resolveTargetElement(target: any): Element | null {
     } catch {}
   }
 
-  // 3b. Additional data-* tracking attributes (data-testid, data-id, data-qa, data-cy)
   if (target.elementId) {
     const byDataAttr = document.querySelector(
       `[data-testid="${target.elementId}"], [data-id="${target.elementId}"], [data-qa="${target.elementId}"], [data-cy="${target.elementId}"]`
@@ -265,7 +266,6 @@ function resolveTargetElement(target: any): Element | null {
 
   const searchText = (target.label || target.text || "").trim().toLowerCase();
 
-  // 6. aria-label
   if (searchText) {
     const interactiveElements = Array.from(
       document.querySelectorAll(
@@ -279,7 +279,6 @@ function resolveTargetElement(target: any): Element | null {
     if (byAria) return byAria;
   }
 
-  // 7. Associated label text
   if (searchText) {
     const labels = Array.from(document.querySelectorAll("label"));
     const matchedLabel = labels.find((lbl) => {
@@ -296,7 +295,6 @@ function resolveTargetElement(target: any): Element | null {
     }
   }
 
-  // 8. Visible text (button text / value / link text)
   if (searchText) {
     const clickables = Array.from(
       document.querySelectorAll(
@@ -310,7 +308,6 @@ function resolveTargetElement(target: any): Element | null {
     if (byVisibleText) return byVisibleText;
   }
 
-  // 9. Placeholder
   if (searchText) {
     const inputs = Array.from(document.querySelectorAll("input, textarea"));
     const byPlaceholder = inputs.find((el) => {
@@ -320,7 +317,6 @@ function resolveTargetElement(target: any): Element | null {
     if (byPlaceholder) return byPlaceholder;
   }
 
-  // 10. Name attribute
   if (searchText || target.elementId) {
     const nameToMatch = searchText || target.elementId!.toLowerCase();
     const byName = document.querySelector(`[name="${nameToMatch}"]`);
@@ -334,7 +330,6 @@ function resolveTargetElement(target: any): Element | null {
     if (byPartialName) return byPartialName;
   }
 
-  // 11. Role + visible text
   if (searchText) {
     const withRoles = Array.from(document.querySelectorAll("[role]"));
     const byRoleText = withRoles.find((el) => {
@@ -344,7 +339,6 @@ function resolveTargetElement(target: any): Element | null {
     if (byRoleText) return byRoleText;
   }
 
-  // 12. Bounding-box coordinates as final fallback
   if (target.bounds && hasValidBounds(target.bounds)) {
     const bounds = target.bounds;
     const centerX = (bounds.x ?? 0) + (bounds.width ?? 0) / 2;
@@ -371,8 +365,11 @@ function setInputValueSafely(element: HTMLInputElement | HTMLTextAreaElement, va
 async function executeAction(action: any): Promise<{ success: boolean; error?: string; verified?: boolean; details?: any }> {
   try {
     const { type, target, value, direction, amount } = action;
+    console.log(`[VEIL][CONTENT] executing action: ${type}`, { target, value });
 
-    // 1. Scroll Action (Local & strictly verified without network dependencies)
+    if (type === "scroll") {
+// ...
+
     if (type === "scroll") {
       const originalScroll = { x: window.scrollX, y: window.scrollY };
       const scrollAmount = amount ?? 300;
@@ -435,13 +432,9 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
           await new Promise((r) => setTimeout(r, 200));
         }
 
-        // Focus element if focusable
         try { htmlElement.focus(); } catch {}
-
-        // Highlight element visually
         highlightElement(element);
 
-        // Capture pre-action state for real verification
         const preUrl = window.location.href;
         const preActive = document.activeElement;
         const preBodyLength = document.body ? document.body.innerHTML.length : 0;
@@ -452,7 +445,6 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
         const markEventFired = () => { eventFired = true; };
         htmlElement.addEventListener("click", markEventFired, { once: true });
 
-        // Dispatch full sequence: pointerdown, mousedown, pointerup, mouseup, click
         const pointerDown = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, view: window });
         const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true, composed: true, view: window });
         const pointerUp = new PointerEvent("pointerup", { bubbles: true, cancelable: true, composed: true, view: window });
@@ -476,10 +468,8 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
           } catch {}
         }
 
-        // Wait 150ms for DOM reactions, event listeners, alerts, mutations
         await new Promise((r) => setTimeout(r, 150));
 
-        // Capture post-action state
         const postUrl = window.location.href;
         const postActive = document.activeElement;
         const postBodyLength = document.body ? document.body.innerHTML.length : 0;
@@ -522,6 +512,36 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
             element.dispatchEvent(new Event("change", { bubbles: true }));
             return { success: true, verified: element.value === option.value };
           }
+        }
+        return { success: false, error: "Target element is not an editable field", verified: false };
+      }
+
+      case "fill_private": {
+        console.log(`[VEIL][CONTENT] fill_private triggered for target:`, target);
+        // Find the sanitized element metadata to check sensitivity and ID
+        const sanitizedEl = state.pageMap?.elements.find(el => {
+          const resolved = resolveTargetElement(el);
+          console.log(`[VEIL][CONTENT] checking el ${el.id} -> resolved: ${resolved === element}`);
+          return resolved === element;
+        });
+
+        if (!sanitizedEl || !sanitizedEl.sensitive) {
+          console.warn(`[VEIL][CONTENT] fill_private failed: element not found or not sensitive. sanitizedEl:`, sanitizedEl);
+          return { success: false, error: "fill_private can only be used on sensitive fields", verified: false };
+        }
+
+        const privateValue = state.privateValues.get(sanitizedEl.id);
+        console.log(`[VEIL][CONTENT] local value for ${sanitizedEl.id}: ${privateValue ? "FOUND" : "NOT FOUND"}`);
+        if (!privateValue) {
+          return { success: false, error: "No local private value found for this field", verified: false };
+        }
+
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          element.focus();
+          setInputValueSafely(element, privateValue);
+          const verified = element.value === privateValue;
+          console.log(`[VEIL][CONTENT] fill_private success: ${verified}`);
+          return { success: true, verified, details: { filledPrivateValue: true } };
         }
         return { success: false, error: "Target element is not an editable field", verified: false };
       }
@@ -576,10 +596,16 @@ function highlightElement(element: Element): void {
     style.id = "ps-highlight-style";
     style.textContent = `
       [data-ps-highlight] {
-        outline: 3px solid #00d4aa !important;
+        outline: 3px solid #0d9488 !important;
         outline-offset: 3px !important;
-        box-shadow: 0 0 0 6px rgba(0, 212, 170, 0.35) !important;
+        box-shadow: 0 0 0 6px rgba(13, 148, 136, 0.3) !important;
         transition: outline 0.2s ease, box-shadow 0.2s ease !important;
+        animation: ps-pulse 2s infinite;
+      }
+      @keyframes ps-pulse {
+        0% { box-shadow: 0 0 0 0px rgba(13, 148, 136, 0.4); }
+        70% { box-shadow: 0 0 0 10px rgba(13, 148, 136, 0); }
+        100% { box-shadow: 0 0 0 0px rgba(13, 148, 136, 0); }
       }
     `;
     document.head.appendChild(style);
@@ -624,8 +650,6 @@ function assignElementIds(elements: SanitizedElement[]): void {
   }
 }
 
-// Observe DOM mutations to keep element identifiers fresh
-let mutationObserver: MutationObserver | null = null;
 function setupMutationObserver(): void {
   if (mutationObserver) return;
   mutationObserver = new MutationObserver(() => {
@@ -639,12 +663,25 @@ function setupMutationObserver(): void {
     subtree: true,
   });
 }
+
+let mutationObserver: MutationObserver | null = null;
 setupMutationObserver();
 
-// Run immediate local observation so sensitive fields and element IDs are ready
 function initialObserve(): void {
   try {
     const elements = extractSanitizedElements(document);
+
+    // Capture private values locally
+    state.privateValues.clear();
+    elements.forEach((el) => {
+      if (el.sensitive) {
+        const realEl = resolveTargetElement(el);
+        if (realEl && (realEl instanceof HTMLInputElement || realEl instanceof HTMLTextAreaElement)) {
+          state.privateValues.set(el.id, realEl.value);
+        }
+      }
+    });
+
     const pageMap = buildPageMap(elements);
     assignElementIds(elements);
     const redactionContext: RedactionContext = {
@@ -662,6 +699,81 @@ function initialObserve(): void {
 }
 initialObserve();
 
+function createStatusOverlay() {
+  if (document.getElementById("veil-status-overlay")) return;
+
+  const overlay = document.createElement("div");
+  overlay.id = "veil-status-overlay";
+  Object.assign(overlay.style, {
+    position: "fixed",
+    top: "20px",
+    right: "20px",
+    zIndex: "2147483647",
+    padding: "12px 16px",
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    color: "#fff",
+    borderRadius: "12px",
+    fontSize: "13px",
+    fontWeight: "500",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.3)",
+    backdropFilter: "blur(8px)",
+    border: "1px solid rgba(255, 255, 255, 0.1)",
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    transition: "all 0.3s ease",
+    pointerEvents: "auto",
+  });
+
+  const icon = document.createElement("div");
+  icon.innerHTML = "🛡️";
+  icon.style.fontSize = "16px";
+
+  const content = document.createElement("div");
+  content.id = "veil-status-content";
+  content.textContent = "Veil is ready";
+  content.style.marginRight = "12px";
+
+  const stopBtn = document.createElement("button");
+  stopBtn.textContent = "Stop";
+  Object.assign(stopBtn.style, {
+    padding: "4px 8px",
+    backgroundColor: "#ef4444",
+    color: "#fff",
+    border: "none",
+    borderRadius: "6px",
+    fontSize: "11px",
+    fontWeight: "600",
+    cursor: "pointer",
+    transition: "background 0.2s ease",
+  });
+  stopBtn.onmouseover = () => stopBtn.style.backgroundColor = "#dc2626";
+  stopBtn.onmouseout = () => stopBtn.style.backgroundColor = "#ef4444";
+  stopBtn.onclick = () => {
+    chrome.runtime.sendMessage({ type: "EMERGENCY_STOP" });
+  };
+
+  overlay.appendChild(icon);
+  overlay.appendChild(content);
+  overlay.appendChild(stopBtn);
+  document.body.appendChild(overlay);
+}
+
+function updateStatusOverlay(status: string, goal?: string) {
+  const overlay = document.getElementById("veil-status-overlay");
+  const content = document.getElementById("veil-status-content");
+  if (!overlay || !content) return;
+
+  overlay.style.display = "flex";
+  content.textContent = goal ? `Veil: ${status} (Goal: ${goal})` : `Veil: ${status}`;
+}
+
+function hideStatusOverlay() {
+  const overlay = document.getElementById("veil-status-overlay");
+  if (overlay) overlay.style.display = "none";
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") return false;
 
@@ -677,6 +789,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case "OBSERVE": {
           console.log(`[VEIL][CONTENT] received OBSERVE for goal: "${message.userGoal || ""}"`);
           console.log(`[VEIL][CONTENT] redaction started`);
+          createStatusOverlay();
+          updateStatusOverlay("Analyzing page...", message.userGoal);
           const payload = await performCapture(message.userGoal || "");
           assignElementIds(payload.pageMap.elements);
           console.log(`[VEIL][CONTENT] redaction complete: ${payload.redactionManifest.length} items`);
@@ -685,14 +799,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
 
         case "EXECUTE_ACTIONS": {
+          createStatusOverlay();
           const results = [];
-          for (const action of message.actions ?? []) {
+          for (let i = 0; i < (message.actions ?? []).length; i++) {
+            const action = message.actions[i];
             const targetDesc = action.target?.elementId || action.target?.selector || action.type;
+            updateStatusOverlay(`Executing step ${i + 1}/${message.actions.length}...`);
             console.log(`[VEIL][CONTENT] executing action: ${action.type} on ${targetDesc}`);
             const result = await executeAction(action);
             console.log(`[VEIL][CONTENT] action verified: ${result.verified ? "success" : "unverified"} (${result.error || "no error"})`);
             results.push({ actionId: action.id, ...result });
           }
+          hideStatusOverlay();
           sendResponse({ success: true, results });
           break;
         }
@@ -717,6 +835,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         case "EMERGENCY_STOP": {
           console.log("[VEIL][CONTENT] clearing highlights");
           clearAllHighlights();
+          hideStatusOverlay();
           sendResponse({ success: true });
           break;
         }
@@ -743,7 +862,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           state.pageMap = null;
           state.lastScreenshot = null;
           state.lastRedactionManifest = [];
+          hideStatusOverlay();
           sendResponse({ success: true });
+          break;
+        }
+
+        case "UPDATE_OVERLAY": {
+          updateStatusOverlay(message.status, message.goal);
           break;
         }
 
@@ -759,4 +884,3 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 });
 
 console.log("[VEIL][CONTENT] Content script initialized on:", window.location.href);
-

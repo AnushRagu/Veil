@@ -16,7 +16,7 @@ export interface PlannerContext {
 
 function findElementsByRole(pageMap: PageMap, roles: string[]): SanitizedElement[] {
   return pageMap.elements.filter(
-    (el) => roles.includes(el.role) && el.visible && el.enabled && !el.sensitive
+    (el) => roles.includes(el.role) && el.visible && el.enabled
   );
 }
 
@@ -36,7 +36,7 @@ function findElementByLabelOrRole(pageMap: PageMap, keywords: string[]): Sanitiz
   
   // Score each element based on match quality
   const scoredElements = pageMap.elements
-    .filter(el => el.visible && el.enabled && !el.sensitive)
+    .filter(el => el.visible && el.enabled)
     .map(el => {
       let score = 0;
       let hasNonRoleMatch = false;
@@ -150,7 +150,6 @@ function findElementByNameOrId(pageMap: PageMap, keywords: string[]): SanitizedE
     (el) =>
       el.visible &&
       el.enabled &&
-      !el.sensitive &&
       (el.name && lowerKeywords.some(kw => el.name!.toLowerCase().includes(kw))) ||
       (el.elementId && lowerKeywords.some(kw => el.elementId!.toLowerCase().includes(kw))) ||
       (el.autocomplete && lowerKeywords.some(kw => el.autocomplete!.toLowerCase().includes(kw)))
@@ -325,10 +324,14 @@ function planForFill(
 
   if (target) {
     if (target.sensitive) {
+      console.log(`[PLANNER] Sensitive target found: ${target.label}. Requesting fill_private.`);
+      const privateAction = createAction("fill_private", target, `Fill sensitive field "${target.label}" using local secret`, 0.9, {
+        risk: "medium",
+      });
       return {
-        actions: [],
-        summary: `Field "${targetName}" is identified as sensitive and cannot be automatically populated from server.`,
-        confidence: 0.7,
+        actions: privateAction ? [privateAction] : [],
+        summary: `Will fill sensitive field "${target.label}" using local secret.`,
+        confidence: 0.9,
         requiresConfirmation: true,
       };
     }
@@ -346,6 +349,7 @@ function planForFill(
     };
   }
 
+  console.log(`[PLANNER] No target found for fill goal: ${targetName}`);
   return {
     actions: [],
     summary: `Could not find input field matching "${targetName}".`,

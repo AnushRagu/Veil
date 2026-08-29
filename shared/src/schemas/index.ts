@@ -183,6 +183,7 @@ export const ActionTypeSchema = z.enum([
   "highlight",
   "select",
   "navigate",
+  "fill_private",
 ]);
 
 export type ActionType = z.infer<typeof ActionTypeSchema>;

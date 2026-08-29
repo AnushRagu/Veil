@@ -116,6 +116,7 @@ export const ActionTypeSchema = z.enum([
     "highlight",
     "select",
     "navigate",
+    "fill_private",
 ]);
 export const ScrollDirectionSchema = z.enum(["up", "down", "left", "right"]);
 export const ActionTargetSchema = z.object({

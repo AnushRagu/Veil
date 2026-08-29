@@ -827,7 +827,7 @@ export declare const ClientPayloadSchema: z.ZodObject<{
     }[];
 }>;
 export type ClientPayload = z.infer<typeof ClientPayloadSchema>;
-export declare const ActionTypeSchema: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate"]>;
+export declare const ActionTypeSchema: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate", "fill_private"]>;
 export type ActionType = z.infer<typeof ActionTypeSchema>;
 export declare const ScrollDirectionSchema: z.ZodEnum<["up", "down", "left", "right"]>;
 export type ScrollDirection = z.infer<typeof ScrollDirectionSchema>;
@@ -878,7 +878,7 @@ export declare const ActionTargetSchema: z.ZodObject<{
 export type ActionTarget = z.infer<typeof ActionTargetSchema>;
 export declare const ServerActionSchema: z.ZodObject<{
     id: z.ZodString;
-    type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate"]>;
+    type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate", "fill_private"]>;
     target: z.ZodOptional<z.ZodObject<{
         elementId: z.ZodOptional<z.ZodString>;
         bounds: z.ZodOptional<z.ZodObject<{
@@ -930,7 +930,7 @@ export declare const ServerActionSchema: z.ZodObject<{
     confidence: z.ZodNumber;
     risk: z.ZodOptional<z.ZodEnum<["low", "medium", "high"]>>;
 }, "strip", z.ZodTypeAny, {
-    type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+    type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
     value?: string;
     id?: string;
     confidence?: number;
@@ -951,7 +951,7 @@ export declare const ServerActionSchema: z.ZodObject<{
     reason?: string;
     risk?: "low" | "medium" | "high";
 }, {
-    type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+    type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
     value?: string;
     id?: string;
     confidence?: number;
@@ -979,7 +979,7 @@ export declare const ServerPlanSchema: z.ZodObject<{
     requiresUserConfirmation: z.ZodBoolean;
     actions: z.ZodArray<z.ZodObject<{
         id: z.ZodString;
-        type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate"]>;
+        type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate", "fill_private"]>;
         target: z.ZodOptional<z.ZodObject<{
             elementId: z.ZodOptional<z.ZodString>;
             bounds: z.ZodOptional<z.ZodObject<{
@@ -1031,7 +1031,7 @@ export declare const ServerPlanSchema: z.ZodObject<{
         confidence: z.ZodNumber;
         risk: z.ZodOptional<z.ZodEnum<["low", "medium", "high"]>>;
     }, "strip", z.ZodTypeAny, {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1052,7 +1052,7 @@ export declare const ServerPlanSchema: z.ZodObject<{
         reason?: string;
         risk?: "low" | "medium" | "high";
     }, {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1079,7 +1079,7 @@ export declare const ServerPlanSchema: z.ZodObject<{
     summary?: string;
     requiresUserConfirmation?: boolean;
     actions?: {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1106,7 +1106,7 @@ export declare const ServerPlanSchema: z.ZodObject<{
     summary?: string;
     requiresUserConfirmation?: boolean;
     actions?: {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1171,7 +1171,7 @@ export type ActionPolicy = z.infer<typeof ActionPolicySchema>;
 export declare const ValidatedActionSchema: z.ZodObject<{
     action: z.ZodObject<{
         id: z.ZodString;
-        type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate"]>;
+        type: z.ZodEnum<["click", "scroll", "focus", "type", "wait", "highlight", "select", "navigate", "fill_private"]>;
         target: z.ZodOptional<z.ZodObject<{
             elementId: z.ZodOptional<z.ZodString>;
             bounds: z.ZodOptional<z.ZodObject<{
@@ -1223,7 +1223,7 @@ export declare const ValidatedActionSchema: z.ZodObject<{
         confidence: z.ZodNumber;
         risk: z.ZodOptional<z.ZodEnum<["low", "medium", "high"]>>;
     }, "strip", z.ZodTypeAny, {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1244,7 +1244,7 @@ export declare const ValidatedActionSchema: z.ZodObject<{
         reason?: string;
         risk?: "low" | "medium" | "high";
     }, {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1383,7 +1383,7 @@ export declare const ValidatedActionSchema: z.ZodObject<{
 }, "strip", z.ZodTypeAny, {
     reason?: string;
     action?: {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
@@ -1443,7 +1443,7 @@ export declare const ValidatedActionSchema: z.ZodObject<{
 }, {
     reason?: string;
     action?: {
-        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait";
+        type?: "highlight" | "click" | "select" | "type" | "scroll" | "navigate" | "focus" | "wait" | "fill_private";
         value?: string;
         id?: string;
         confidence?: number;
