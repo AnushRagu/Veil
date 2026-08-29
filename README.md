@@ -155,8 +155,8 @@ npm run dev:extension
 
 ```bash
 # Serve demo page
-npx serve demo
-# Open http://localhost:3000
+npx serve demo -l 3002
+# Open http://localhost:3002
 ```
 
 Or with Docker:

@@ -43,6 +43,30 @@ export const SanitizedElementSchema = z.object({
     visible: z.boolean(),
     enabled: z.boolean(),
     sensitive: z.boolean(),
+    placeholder: z.string().optional(),
+    valueState: z.enum(["empty", "filled", "unknown"]).optional(),
+    href: z.string().optional(),
+    tagName: z.string().optional(),
+    type: z.string().optional(),
+    // Robust locator fields
+    selector: z.string().optional(),
+    xpath: z.string().optional(),
+    ariaLabel: z.string().optional(),
+    ariaLabelledBy: z.string().optional(),
+    name: z.string().optional(),
+    elementId: z.string().optional(),
+    formId: z.string().optional(),
+    autocomplete: z.string().optional(),
+    inputType: z.string().optional(),
+    required: z.boolean().optional(),
+    readOnly: z.boolean().optional(),
+    // Text content (sanitized)
+    textContent: z.string().optional(),
+    value: z.string().optional(),
+    // Vision / perception fusion fields
+    domConfidence: z.number().min(0).max(1).optional(),
+    visionConfidence: z.number().min(0).max(1).optional(),
+    combinedConfidence: z.number().min(0).max(1).optional(),
 });
 export const PageMapSchema = z.object({
     urlOrigin: z.string().url(),
@@ -90,11 +114,16 @@ export const ActionTypeSchema = z.enum([
     "type",
     "wait",
     "highlight",
+    "select",
+    "navigate",
 ]);
-export const ScrollDirectionSchema = z.enum(["up", "down"]);
+export const ScrollDirectionSchema = z.enum(["up", "down", "left", "right"]);
 export const ActionTargetSchema = z.object({
     elementId: z.string().optional(),
     bounds: BoundsSchema.optional(),
+    selector: z.string().optional(),
+    text: z.string().optional(),
+    label: z.string().optional(),
 });
 export const ServerActionSchema = z.object({
     id: z.string().uuid(),
@@ -105,12 +134,14 @@ export const ServerActionSchema = z.object({
     amount: z.number().optional(),
     reason: z.string(),
     confidence: z.number().min(0).max(1),
+    risk: z.enum(["low", "medium", "high"]).optional(),
 });
 export const ServerPlanSchema = z.object({
     summary: z.string(),
     confidence: z.number().min(0).max(1),
     requiresUserConfirmation: z.boolean(),
     actions: z.array(ServerActionSchema),
+    mode: z.string().optional(),
 });
 export const InferenceBackendSchema = z.enum(["webgpu", "wasm", "mock"]);
 export const PrivacyStatusSchema = z.object({
@@ -133,6 +164,8 @@ export const TelemetryEntrySchema = z.object({
         "sensitive_regions_detected",
         "actions_blocked",
         "inference_backend",
+        "vision_latency_ms",
+        "execution_latency_ms",
     ]),
     value: z.number(),
     sessionId: z.string().uuid(),

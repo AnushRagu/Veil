@@ -1,34 +1,11 @@
 /**
  * Veil Offscreen Document
  *
- * Runs the ONNX Runtime Web vision pipeline inside a real ES module context
- * (the offscreen document is a normal extension page, not a content script).
- * Content scripts cannot use `import.meta` or dynamic `import()`, so the
- * vision pipeline is hosted here and invoked over chrome.runtime messaging
- * via the service worker.
- *
- * Protocol (handled by the background service worker):
- *   Request : { type: "VISION_PROCESS", requestId, imageData: { dataUrl } }
- *   Response: { type: "VISION_PROCESS_RESPONSE", requestId, ok, result?, error? }
+ * Runs the vision pipeline inside a dedicated extension page context.
+ * Communicates with the background service worker over structured chrome.runtime messaging.
  */
-import { createVisionPipeline, VisionPipeline } from "../vision/visionPipeline";
-import { VisionResult, VisionPipelineConfig } from "../vision/visionPipeline";
+import { createVisionPipeline, VisionPipeline, VisionResult, VisionPipelineConfig } from "../vision/visionPipeline";
 import { Bounds, RedactionEntry } from "@privatesight/shared";
-
-interface VisionProcessRequest {
-  type: "VISION_PROCESS";
-  requestId: string;
-  imageData: { dataUrl: string; width: number; height: number };
-  config?: Partial<VisionPipelineConfig>;
-}
-
-interface VisionProcessResponse {
-  type: "VISION_PROCESS_RESPONSE";
-  requestId: string;
-  ok: boolean;
-  result?: SerializedVisionResult;
-  error?: string;
-}
 
 interface SerializedDetection {
   bounds: Bounds;
@@ -44,40 +21,46 @@ interface SerializedVisionResult {
   backend: "webgpu" | "wasm" | "mock";
 }
 
+let pipelineInstance: VisionPipeline | null = null;
 let pipelinePromise: Promise<VisionPipeline> | null = null;
 
 async function getPipeline(config?: Partial<VisionPipelineConfig>): Promise<VisionPipeline> {
+  if (pipelineInstance && pipelineInstance.isReady()) return pipelineInstance;
   if (pipelinePromise) return pipelinePromise;
+
   pipelinePromise = (async () => {
     const pipeline = createVisionPipeline({
-      provider: "mock",
+      provider: config?.provider || "mock",
       enableFaceDetection: true,
       enableSensitiveRegionDetection: true,
       ...config,
     });
     await pipeline.initialize();
+    pipelineInstance = pipeline;
     return pipeline;
   })();
-  return pipelinePromise;
+
+  try {
+    return await pipelinePromise;
+  } finally {
+    pipelinePromise = null;
+  }
 }
 
 function dataUrlToCanvas(dataUrl: string, width: number, height: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = width || 1280;
+  canvas.height = height || 720;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Offscreen: could not get 2d context");
-  // Synchronous paint from a fresh Image is fine here because the data URL
-  // was created from a canvas in the same process and is immediately ready.
+  if (!ctx) throw new Error("Offscreen: could not get 2d canvas context");
+
   const img = new Image();
   img.src = dataUrl;
   if (!img.complete || img.naturalWidth === 0) {
-    // Fall back: at least produce a usable canvas even if the image
-    // hasn't decoded synchronously. The pipeline accepts canvas inputs.
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
   } else {
-    ctx.drawImage(img, 0, 0, width, height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   }
   return canvas;
 }
@@ -101,36 +84,83 @@ function serializeResult(result: VisionResult): SerializedVisionResult {
   };
 }
 
-async function handleRequest(req: VisionProcessRequest): Promise<VisionProcessResponse> {
-  try {
-    const pipeline = await getPipeline(req.config);
-    const canvas = dataUrlToCanvas(
-      req.imageData.dataUrl,
-      req.imageData.width,
-      req.imageData.height
-    );
-    const result = await pipeline.processFrame(canvas, []);
-    return {
-      type: "VISION_PROCESS_RESPONSE",
-      requestId: req.requestId,
-      ok: true,
-      result: serializeResult(result),
-    };
-  } catch (err) {
-    return {
-      type: "VISION_PROCESS_RESPONSE",
-      requestId: req.requestId,
-      ok: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (!message || typeof message !== "object") return false;
-  if (message.type !== "VISION_PROCESS") return false;
-  handleRequest(message as VisionProcessRequest).then(sendResponse);
+
+  // Filter messages specifically intended for offscreen or of offscreen types
+  const isForOffscreen = message.target === "OFFSCREEN" || [
+    "OFFSCREEN_INITIALIZE",
+    "OFFSCREEN_PROCESS_FRAME",
+    "OFFSCREEN_SHUTDOWN",
+    "OFFSCREEN_STATUS",
+    "PROCESS_FRAME",
+    "INITIALIZE_VISION",
+    "SHUTDOWN_VISION",
+  ].includes(message.type);
+
+  if (!isForOffscreen) return false;
+
+  (async () => {
+    try {
+      switch (message.type) {
+        case "OFFSCREEN_INITIALIZE":
+        case "INITIALIZE_VISION": {
+          const pipeline = await getPipeline(message.config);
+          sendResponse({
+            ok: true,
+            backend: pipeline.getBackend(),
+            provider: pipeline.getProviderName(),
+          });
+          break;
+        }
+
+        case "OFFSCREEN_PROCESS_FRAME":
+        case "PROCESS_FRAME":
+        case "VISION_PROCESS": {
+          console.log(`[VEIL][OFFSCREEN] processing frame (${message.imageData?.width}x${message.imageData?.height})`);
+          const pipeline = await getPipeline(message.config);
+          const { dataUrl, width, height } = message.imageData || {};
+          const canvas = dataUrlToCanvas(dataUrl, width, height);
+          const result = await pipeline.processFrame(canvas, message.existingRedactions || []);
+          console.log(`[VEIL][OFFSCREEN] frame processed: ${result.redactionEntries.length} redaction entries (${result.backend})`);
+          sendResponse({
+            ok: true,
+            result: serializeResult(result),
+          });
+          break;
+        }
+
+        case "OFFSCREEN_STATUS":
+        case "GET_VISION_STATUS": {
+          const ready = pipelineInstance?.isReady() ?? false;
+          const backend = pipelineInstance?.getBackend() ?? "mock";
+          sendResponse({ ok: true, ready, backend });
+          break;
+        }
+
+        case "OFFSCREEN_SHUTDOWN":
+        case "SHUTDOWN_VISION": {
+          pipelineInstance?.dispose();
+          pipelineInstance = null;
+          pipelinePromise = null;
+          sendResponse({ ok: true });
+          break;
+        }
+
+        default:
+          sendResponse({ ok: false, error: `Unknown offscreen message type: ${message.type}` });
+      }
+    } catch (err) {
+      console.error("[VEIL][OFFSCREEN] Processing error:", err);
+      sendResponse({
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })();
+
   return true;
 });
 
-console.log("[Veil] Offscreen document ready");
+console.log("[VEIL][OFFSCREEN] Offscreen document initialized");
+

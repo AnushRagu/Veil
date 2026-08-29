@@ -13,21 +13,22 @@ const ASSETS_TO_COPY = [
   "offscreen.html",
 ];
 
-function flattenPopupHtml() {
+function flattenHtmlPages() {
   return {
-    name: "flatten-popup-html",
+    name: "flatten-html-pages",
     closeBundle() {
-      // After all assets are emitted, move dist/src/popup/index.html to dist/popup.html
-      // and rewrite the absolute asset paths to be relative so the popup loads inside
-      // the Chrome extension (where /popup.js does NOT resolve to dist/popup.js).
-      const srcHtml = resolve(__dirname, "dist/src/popup/index.html");
-      const destHtml = resolve(__dirname, "dist/popup.html");
-      if (!existsSync(srcHtml)) return;
+      const pages = [
+        { src: resolve(__dirname, "dist/src/popup/index.html"), dest: resolve(__dirname, "dist/popup.html") },
+        { src: resolve(__dirname, "dist/src/offscreen/index.html"), dest: resolve(__dirname, "dist/offscreen.html") },
+      ];
 
-      let html = readFileSync(srcHtml, "utf8");
-      html = html.replace(/(src|href)="\/([^"]+)"/g, (_match, attr, path) => `${attr}="./${path}"`);
-
-      writeFileSync(destHtml, html);
+      for (const page of pages) {
+        if (existsSync(page.src)) {
+          let html = readFileSync(page.src, "utf8");
+          html = html.replace(/(src|href)="\/([^"]+)"/g, (_match, attr, path) => `${attr}="./${path}"`);
+          writeFileSync(page.dest, html);
+        }
+      }
 
       // Clean up the now-redundant src/ subtree.
       const srcDir = resolve(__dirname, "dist/src");
@@ -41,10 +42,8 @@ function flattenPopupHtml() {
               unlinkSync(full);
             }
           }
-          // Best-effort: only remove the leaf if it's now empty
           try {
             readdirSync(dir);
-            // Don't rmdir the top-level src/ — other plugins may not be done.
           } catch {}
         };
         removeRecursive(srcDir);
@@ -53,11 +52,36 @@ function flattenPopupHtml() {
   };
 }
 
+import { buildSync } from "esbuild";
+
+function bundleContentScript() {
+  return {
+    name: "bundle-content-script",
+    closeBundle() {
+      const contentSrc = resolve(__dirname, "src/content/index.ts");
+      const contentDest = resolve(__dirname, "dist/content.js");
+      buildSync({
+        entryPoints: [contentSrc],
+        bundle: true,
+        format: "iife",
+        outfile: contentDest,
+        sourcemap: true,
+        target: ["chrome100"],
+        alias: {
+          "@privatesight/shared": resolve(__dirname, "../shared/src/index.ts"),
+          "@privatesight/shared/schemas": resolve(__dirname, "../shared/src/schemas/index.ts"),
+        },
+      });
+    },
+  };
+}
+
 export default defineConfig({
   base: "./",
   plugins: [
     react(),
-    flattenPopupHtml(),
+    flattenHtmlPages(),
+    bundleContentScript(),
     {
       name: "copy-manifest",
       closeBundle() {
@@ -77,14 +101,9 @@ export default defineConfig({
       name: "copy-onnx-assets",
       closeBundle() {
         const distDir = resolve(__dirname, "dist");
-        const srcDir = resolve(__dirname, "src");
         ASSETS_TO_COPY.forEach((asset) => {
-          let src: string;
-          if (asset === "offscreen.html") {
-            src = resolve(srcDir, "offscreen/index.html");
-          } else {
-            src = join(ONNXRT_DIR, asset);
-          }
+          if (asset === "offscreen.html") return; // Handled by Vite build + flatten
+          const src = join(ONNXRT_DIR, asset);
           if (existsSync(src)) {
             const dest = resolve(distDir, asset);
             mkdirSync(resolve(distDir, ".."), { recursive: true });
@@ -106,8 +125,8 @@ export default defineConfig({
     rollupOptions: {
       input: {
         popup: resolve(__dirname, "src/popup/index.html"),
+        offscreen: resolve(__dirname, "src/offscreen/index.html"),
         background: resolve(__dirname, "src/background/index.ts"),
-        content: resolve(__dirname, "src/content/index.ts"),
       },
       output: {
         entryFileNames: "[name].js",

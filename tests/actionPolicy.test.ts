@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { validateAction, ACTION_POLICY, HIGH_CONFIDENCE_AUTO_ACTIONS, CONFIRMATION_REQUIRED_ACTIONS } from "../extension/src/background/index";
+import { validateAction, ACTION_POLICY, HIGH_CONFIDENCE_AUTO_ACTIONS, CONFIRMATION_REQUIRED_ACTIONS } from "@privatesight/shared";
 
 const mockElements = [
   {
@@ -94,29 +94,31 @@ describe("Action Policy Validation", () => {
   });
 
   describe("Confirmation required actions", () => {
-    it("requires confirmation for click", () => {
+    it("requires confirmation for destructive click", () => {
+      const action = {
+        id: "1",
+        type: "click",
+        target: { elementId: "el-4" },
+        reason: "Test",
+        confidence: 0.9,
+      };
+      const result = validateAction(action, mockElements);
+      expect(result.policy).toBe("confirm");
+      expect(result.reason).toContain("destructive");
+    });
+
+    it("requires confirmation for high-risk marked action", () => {
       const action = {
         id: "1",
         type: "click",
         target: { elementId: "el-1" },
+        risk: "high" as const,
         reason: "Test",
         confidence: 0.9,
       };
       const result = validateAction(action, mockElements);
       expect(result.policy).toBe("confirm");
-    });
-
-    it("requires confirmation for type", () => {
-      const action = {
-        id: "1",
-        type: "type",
-        target: { elementId: "el-1" },
-        value: "test",
-        reason: "Test",
-        confidence: 0.9,
-      };
-      const result = validateAction(action, mockElements);
-      expect(result.policy).toBe("confirm");
+      expect(result.reason).toContain("High-risk");
     });
 
     it("requires confirmation for low confidence click", () => {
@@ -163,7 +165,7 @@ describe("Action Policy Validation", () => {
       const action = {
         id: "1",
         type: "click",
-        target: { elementId: "el-1" },
+        target: { elementId: "el-5" },
         reason: "Test",
         confidence: 0.9,
       };

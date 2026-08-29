@@ -173,6 +173,7 @@
         <button class="btn btn-secondary" id="cancelBtn" type="button">Cancel</button>
         <button class="btn btn-danger" id="deleteBtn" type="button">Delete Account</button>
       </div>
+      <div id="actionFeedback" class="info-box" style="display:none; margin-top: 16px; font-weight: 500;"></div>
     </div>
 
     <div class="info-box warning">
@@ -192,9 +193,28 @@
   </div>
 
   <script>
-    document.getElementById('submitBtn').addEventListener('click', () => alert('Form submitted!'));
-    document.getElementById('cancelBtn').addEventListener('click', () => alert('Cancelled'));
-    document.getElementById('deleteBtn').addEventListener('click', () => alert('Delete requested - this would require confirmation'));
+    function showFeedback(text, type = 'success') {
+      const fb = document.getElementById('actionFeedback');
+      if (fb) {
+        fb.style.display = 'block';
+        fb.textContent = text;
+        fb.className = 'info-box ' + (type === 'danger' ? 'danger' : type === 'warning' ? 'warning' : '');
+        fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    document.getElementById('submitBtn').addEventListener('click', () => {
+      showFeedback('✓ Request submitted successfully', 'success');
+      console.log('[Demo] Form submitted successfully');
+    });
+    document.getElementById('cancelBtn').addEventListener('click', () => {
+      showFeedback('⚠ Action cancelled', 'warning');
+      console.log('[Demo] Action cancelled');
+    });
+    document.getElementById('deleteBtn').addEventListener('click', () => {
+      showFeedback('🛑 Delete requested - account marked for deletion', 'danger');
+      console.log('[Demo] Delete requested');
+    });
   </script>
 </body>
 </html>

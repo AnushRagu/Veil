@@ -1,9 +1,1110 @@
-const R={email:/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g,phone:/(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,creditCard:/\b(?:\d[ -]*?){13,16}\b/g,aadhaar:/\b\d{4}\s?\d{4}\s?\d{4}\b/g,pan:/\b[A-Z]{5}\d{4}[A-Z]{1}\b/g,ssn:/\b\d{3}-\d{2}-\d{4}\b/g,cvv:/\b\d{3,4}\b(?!\s?\d{4})/g,ipv4:/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g,url:/https?:\/\/[^\s]+/g,apiKey:/\b[A-Za-z0-9_-]{32,}\b/g,jwt:/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g},L={email:"email",phone:"phone",creditCard:"credit_card",aadhaar:"aadhaar",pan:"pan",ssn:"account_number",cvv:"cvv",ipv4:"custom",url:"custom",apiKey:"custom",jwt:"custom"},D=["password","new-password","current-password","one-time-code","cc-number","cc-csc","cc-exp","cc-name","address-line1","address-line2","address-line3","postal-code","tel","email"],N=["password","tel","email"],T=["password","passwort","contraseña","mot de passe","senha","parola","hasło","пароль","密码","パスワード","비밀번호","credit card","creditcard","card number","cardnumber","cvv","cvc","security code","otp","one-time","verification code","auth code","aadhaar","pan","ssn","social security","account number","routing number","iban","swift","pin","cvc2","cvv2"],x=["data-sensitive","data-private","data-pii","data-confidential"];function v(e){for(const[t,n]of Object.entries(R)){const r=e.match(n);if(r&&r.length>0)return{category:L[t],match:r[0]}}return null}function g(e){return{email:"[REDACTED_EMAIL]",phone:"[REDACTED_PHONE]",credit_card:"[REDACTED_CARD]",cvv:"[REDACTED_CVV]",aadhaar:"[REDACTED_AADHAAR]",pan:"[REDACTED_PAN]",account_number:"[REDACTED_ACCOUNT]",password:"[REDACTED_PASSWORD]",otp:"[REDACTED_OTP]",face:"[REDACTED_FACE]",explicit_sensitive:"[REDACTED_SENSITIVE]",custom:"[REDACTED]"}[e]||"[REDACTED]"}const k=["textbox","searchbox","combobox","spinbutton"];function P(e){return x.some(t=>e.hasAttribute(t))}function O(e){var n;const t=((n=e.getAttribute("autocomplete"))==null?void 0:n.toLowerCase())||"";return D.some(r=>t.includes(r))}function H(e){return e instanceof HTMLInputElement?N.includes(e.type.toLowerCase()):!1}function U(e){var n,r;const t=(e.getAttribute("aria-label")||e.getAttribute("placeholder")||e.getAttribute("name")||e.getAttribute("id")||((r=(n=e.labels)==null?void 0:n[0])==null?void 0:r.textContent)||"").toLowerCase();return T.some(i=>t.includes(i))}function V(e){const t=e.closest("label")||document.querySelector(`label[for="${e.id}"]`);if(t)return t.textContent||"";const n=e.getAttribute("aria-labelledby");if(n){const r=document.getElementById(n);if(r)return r.textContent||""}return""}function B(e,t){if(P(e)||O(e)||H(e)||U(e))return!0;const n=V(e).toLowerCase();if(T.some(i=>n.includes(i)))return!0;const r=e.getAttribute("role")||"";if(k.includes(r)){const i=v(t);if(i&&["password","credit_card","cvv","aadhaar","pan","otp"].includes(i.category))return!0}return!1}function S(e=document){const t=[],n=document.createTreeWalker(e,NodeFilter.SHOW_ELEMENT,{acceptNode(i){const o=i,a=getComputedStyle(o);if(a.display==="none"||a.visibility==="hidden")return NodeFilter.FILTER_REJECT;const c=o.getBoundingClientRect();if(c.width===0&&c.height===0)return NodeFilter.FILTER_REJECT;const l=o.getAttribute("role")||C(o);return["button","link","textbox","combobox","checkbox","radio","menuitem","tab","heading","img","searchbox","slider","spinbutton","switch","option","listbox","dialog"].includes(l)||o.tagName.match(/^(A|BUTTON|INPUT|SELECT|TEXTAREA|IMG|H[1-6]|LABEL)$/i)?NodeFilter.FILTER_ACCEPT:NodeFilter.FILTER_SKIP}});let r=0;for(;n.nextNode();){const i=n.currentNode,o=i.getBoundingClientRect();if(o.width===0&&o.height===0)continue;const a=i.getAttribute("role")||C(i),c=F(i),l=i.textContent||"",u=B(i,l);t.push({id:`el-${r++}-${$()}`,role:a,label:z(c,u),bounds:{x:Math.round(o.x),y:Math.round(o.y),width:Math.round(o.width),height:Math.round(o.height)},visible:W(i),enabled:Z(i),sensitive:u})}return t}function C(e){var i;const t=e.tagName.toLowerCase(),n=(i=e.type)==null?void 0:i.toLowerCase();return{a:"link",button:"button",input:n==="checkbox"?"checkbox":n==="radio"?"radio":n==="range"?"slider":"textbox",select:"combobox",textarea:"textbox",img:"img",h1:"heading",h2:"heading",h3:"heading",h4:"heading",h5:"heading",h6:"heading",label:"generic",form:"form",nav:"navigation",main:"main",aside:"complementary",header:"banner",footer:"contentinfo",section:"region",article:"region",dialog:"dialog",ul:"listbox",ol:"listbox",li:"option"}[t]||"generic"}function F(e){var t,n,r,i;return(e.getAttribute("aria-label")||e.getAttribute("aria-labelledby")&&((t=document.getElementById(e.getAttribute("aria-labelledby")))==null?void 0:t.textContent)||e.getAttribute("title")||e.getAttribute("placeholder")||((r=(n=e.labels)==null?void 0:n[0])==null?void 0:r.textContent)||e.getAttribute("alt")||((i=e.textContent)==null?void 0:i.slice(0,100))||"").trim()}function z(e,t){if(!t)return e;const n=v(e);return n?g(n.category):"[REDACTED_LABEL]"}function W(e){const t=getComputedStyle(e);return t.display!=="none"&&t.visibility!=="hidden"&&t.opacity!=="0"}function Z(e){return e instanceof HTMLInputElement||e instanceof HTMLSelectElement||e instanceof HTMLTextAreaElement||e instanceof HTMLButtonElement?!e.disabled:!0}function $(){return Math.random().toString(36).substring(2,10)}function G(e){return e!==void 0&&typeof e.x=="number"&&typeof e.y=="number"&&typeof e.width=="number"&&typeof e.height=="number"}function j(e,t,n){const r=[];for(const i of e){if(!i.sensitive||!G(i.bounds))continue;const o=I(i),a=q(i,o);r.push({category:o,bounds:{...i.bounds},confidence:a,replacement:g(o)})}return r}function I(e){const t=(e.label??"").toLowerCase();return t.includes("password")||t.includes("passwort")?"password":t.includes("otp")||t.includes("one-time")||t.includes("verification")?"otp":t.includes("credit")||t.includes("card")?"credit_card":t.includes("cvv")||t.includes("cvc")?"cvv":t.includes("aadhaar")?"aadhaar":t.includes("pan")?"pan":t.includes("account")||t.includes("routing")||t.includes("iban")?"account_number":t.includes("email")||t.includes("e-mail")?"email":t.includes("phone")||t.includes("tel")||t.includes("mobile")?"phone":t.includes("address")||t.includes("street")||t.includes("zip")||t.includes("postal")?"address":"explicit_sensitive"}function q(e,t){let n=.5;const r=(e.label??"").toLowerCase();return x.some(i=>r.includes(i))&&(n+=.4),["password","credit_card","cvv","aadhaar","pan"].includes(t)&&(n+=.3),r.includes(t.replace("_"," "))&&(n+=.2),Math.min(n,1)}function K(e){const t=j(e.elements),n=e.elements.map(i=>{if(!i.sensitive)return i;const o=I(i);return{...i,label:g(o)}}),r=new Map;for(const i of t)r.set(i.replacement,i.category);return{redactedElements:n,manifest:t,redactedText:r}}function Y(){return crypto.randomUUID()}function J(e,t=200){return e.slice(0,t).replace(/[\r\n\t]/g," ").trim()}function X(e){try{return new URL(e).origin}catch{return"unknown"}}const s={sessionId:null,pageMap:null,lastScreenshot:null,lastRedactionManifest:[],isCapturing:!1};function b(e){return{urlOrigin:X(window.location.href),title:J(document.title),viewport:{width:window.innerWidth,height:window.innerHeight},elements:e}}function m(e){return e!==void 0&&typeof e.x=="number"&&typeof e.y=="number"&&typeof e.width=="number"&&typeof e.height=="number"}async function Q(){const e=document.createElement("canvas");e.width=window.innerWidth,e.height=window.innerHeight;const t=e.getContext("2d");if(!t)throw new Error("Could not get canvas context");await new Promise(n=>{const r=()=>{window.removeEventListener("scroll",r),n()};window.addEventListener("scroll",r),setTimeout(n,50)});try{t.fillStyle="#ffffff",t.fillRect(0,0,e.width,e.height),document.querySelectorAll("body *").forEach(r=>{const i=r.getBoundingClientRect();i.width>0&&i.height>0&&(t.fillStyle="rgba(0,0,0,0.1)",t.fillRect(i.x,i.y,i.width,i.height))})}catch{t.fillStyle="#ffffff",t.fillRect(0,0,e.width,e.height)}return e}function ee(e,t,n){return new Promise(r=>{chrome.runtime.sendMessage({type:"VISION_PROCESS",imageData:{dataUrl:e,width:t,height:n}},i=>{if(chrome.runtime.lastError){r({ok:!1,error:chrome.runtime.lastError.message});return}r(i??{ok:!1,error:"No response from background"})})})}async function te(e){if(s.isCapturing)throw new Error("Capture already in progress");s.isCapturing=!0;try{const t=S(document),n=b(t),r=await Q();s.lastScreenshot=r;const i={elements:n.elements,screenshotWidth:r.width,screenshotHeight:r.height},o=K(i),a=o.manifest,c=r.toDataURL("image/jpeg",.7),l=await ee(c,r.width,r.height),u=l.ok&&l.result?l.result.redactionEntries:[],p=[...a,...u],_=o.redactedElements.map(h=>{const y=u.find(A=>{if(!m(A.bounds)||!m(h.bounds))return!1;const d=A.bounds,f=h.bounds;return d.x<f.x+f.width&&d.x+d.width>f.x&&d.y<f.y+f.height&&d.y+d.height>f.y});return y?{...h,sensitive:!0,label:y.replacement}:h}),E=b(_),w=r.cloneNode(!0);ne(w,p);const M=w.toDataURL("image/jpeg",.7);return s.pageMap=E,s.lastRedactionManifest=p,s.sessionId=Y(),{sessionId:s.sessionId,timestamp:new Date().toISOString(),userGoal:e,sanitizedScreenshot:M,pageMap:E,redactionManifest:p}}finally{s.isCapturing=!1}}function ne(e,t){const n=e.getContext("2d");if(n)for(const r of t){if(!m(r.bounds))continue;const{bounds:i,category:o}=r,a=Math.max(0,Math.floor(i.x)),c=Math.max(0,Math.floor(i.y)),l=Math.min(e.width-a,Math.floor(i.width)),u=Math.min(e.height-c,Math.floor(i.height));l<=0||u<=0||(o==="face"?(n.filter="blur(8px)",n.drawImage(e,a,c,l,u,a,c,l,u),n.filter="none"):(n.fillStyle="rgba(0, 0, 0, 0.95)",n.fillRect(a,c,l,u)))}}async function ie(e){try{const{type:t,target:n,value:r,direction:i,amount:o}=e;let a=null;if(n!=null&&n.elementId&&(a=document.querySelector(`[data-ps-id="${n.elementId}"]`)),!a&&(n!=null&&n.bounds)&&m(n.bounds)){const c=n.bounds;a=document.elementFromPoint((c.x??0)+(c.width??0)/2,(c.y??0)+(c.height??0)/2)}if(!a)return{success:!1,error:"Target element not found"};switch(t){case"highlight":re(a);break;case"focus":a.focus();break;case"click":a.click();break;case"scroll":window.scrollBy({top:i==="down"?o??300:-(o??300),behavior:"smooth"});break;case"wait":await new Promise(c=>setTimeout(c,o??500));break;case"type":(a instanceof HTMLInputElement||a instanceof HTMLTextAreaElement)&&(a.value=r??"",a.dispatchEvent(new Event("input",{bubbles:!0})),a.dispatchEvent(new Event("change",{bubbles:!0})));break;default:return{success:!1,error:`Unknown action type: ${t}`}}return{success:!0}}catch(t){return{success:!1,error:t instanceof Error?t.message:"Unknown error"}}}function re(e){e.setAttribute("data-ps-highlight","true");const t=document.createElement("style");t.textContent=`
-    [data-ps-highlight] {
-      outline: 3px solid #00d4aa !important;
-      outline-offset: 2px !important;
-      box-shadow: 0 0 0 4px rgba(0, 212, 170, 0.3) !important;
-      transition: outline 0.2s, box-shadow 0.2s !important;
+"use strict";
+(() => {
+  // src/redaction/patterns.ts
+  var PII_PATTERNS = {
+    email: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    phone: /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
+    creditCard: /\b(?:\d[ -]*?){13,16}\b/g,
+    aadhaar: /\b\d{4}\s?\d{4}\s?\d{4}\b/g,
+    pan: /\b[A-Z]{5}\d{4}[A-Z]{1}\b/g,
+    ssn: /\b\d{3}-\d{2}-\d{4}\b/g,
+    cvv: /\b\d{3,4}\b(?!\s?\d{4})/g,
+    otp: /\b\d{6}\b/g,
+    ipv4: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g,
+    apiKey: /\b(?:sk-[A-Za-z0-9]{32,}|[A-Za-z0-9_-]{32,})\b/g,
+    jwt: /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
+    url: /https?:\/\/[^\s]+/g
+  };
+  var PII_CATEGORY_MAP = {
+    email: "email",
+    phone: "phone",
+    creditCard: "credit_card",
+    aadhaar: "aadhaar",
+    pan: "pan",
+    ssn: "account_number",
+    cvv: "cvv",
+    otp: "otp",
+    ipv4: "custom",
+    url: "custom",
+    apiKey: "custom",
+    jwt: "custom"
+  };
+  var SENSITIVE_AUTOCOMPLETE_VALUES = [
+    "password",
+    "new-password",
+    "current-password",
+    "one-time-code",
+    "cc-number",
+    "cc-csc",
+    "cc-exp",
+    "cc-name",
+    "address-line1",
+    "address-line2",
+    "address-line3",
+    "postal-code",
+    "tel",
+    "email"
+  ];
+  var SENSITIVE_INPUT_TYPES = ["password", "tel", "email"];
+  var SENSITIVE_LABEL_KEYWORDS = [
+    "password",
+    "passwort",
+    "contrase\xF1a",
+    "mot de passe",
+    "senha",
+    "parola",
+    "has\u0142o",
+    "\u043F\u0430\u0440\u043E\u043B\u044C",
+    "\u5BC6\u7801",
+    "\u30D1\u30B9\u30EF\u30FC\u30C9",
+    "\uBE44\uBC00\uBC88\uD638",
+    "credit card",
+    "creditcard",
+    "debit card",
+    "card number",
+    "cardnumber",
+    "cvv",
+    "cvc",
+    "security code",
+    "otp",
+    "one-time",
+    "verification code",
+    "auth code",
+    "aadhaar",
+    "pan",
+    "ssn",
+    "social security",
+    "account number",
+    "routing number",
+    "iban",
+    "swift",
+    "pin",
+    "cvc2",
+    "cvv2",
+    "email",
+    "e-mail",
+    "phone",
+    "mobile",
+    "address",
+    "street",
+    "zip",
+    "postal",
+    "expiry",
+    "expiration",
+    "api key",
+    "secret",
+    "token",
+    "profile photo",
+    "profile image",
+    "user photo"
+  ];
+  var EXPLICIT_SENSITIVE_ATTRS = [
+    "data-sensitive",
+    "data-private",
+    "data-pii",
+    "data-confidential"
+  ];
+  function detectPIICategory(text) {
+    for (const [category, pattern] of Object.entries(PII_PATTERNS)) {
+      const matches = text.match(pattern);
+      if (matches && matches.length > 0) {
+        return { category: PII_CATEGORY_MAP[category], match: matches[0] };
+      }
     }
-  `,document.head.appendChild(t),setTimeout(()=>{e.removeAttribute("data-ps-highlight"),t.remove()},3e3)}function oe(e){const t=document.createTreeWalker(document.body,NodeFilter.SHOW_ELEMENT);let n=0;for(;t.nextNode();){const r=t.currentNode;if(n<e.length){const i=e[n].id;r.setAttribute("data-ps-id",i),n++}}}chrome.runtime.onMessage.addListener((e,t,n)=>((async()=>{try{switch(e.type){case"CAPTURE_AND_SEND":{const r=await te(e.userGoal);n({success:!0,payload:r});break}case"EXECUTE_ACTIONS":{const r=[];for(const i of e.actions??[]){const o=await ie(i);r.push({actionId:i.id,...o})}n({success:!0,results:r});break}case"GET_PAGE_MAP":{if(s.pageMap)n({success:!0,pageMap:s.pageMap,redactionManifest:s.lastRedactionManifest});else{const r=S(document),i=b(r);oe(r),s.pageMap=i,n({success:!0,pageMap:i,redactionManifest:[]})}break}case"GET_PRIVACY_STATUS":{n({success:!0,status:{backend:"mock",redactedCount:s.lastRedactionManifest.length,lastCapture:s.sessionId?new Date().toISOString():void 0,sessionActive:!!s.sessionId}});break}case"CLEAR_SESSION":{s.sessionId=null,s.pageMap=null,s.lastScreenshot=null,s.lastRedactionManifest=[],n({success:!0});break}default:n({success:!1,error:"Unknown message type"})}}catch(r){n({success:!1,error:r instanceof Error?r.message:"Unknown error"})}})(),!0));console.log("[Veil] Content script loaded");
+    return null;
+  }
+  function getReplacementToken(category) {
+    const tokens = {
+      email: "[REDACTED_EMAIL]",
+      phone: "[REDACTED_PHONE]",
+      credit_card: "[REDACTED_CARD]",
+      cvv: "[REDACTED_CVV]",
+      aadhaar: "[REDACTED_AADHAAR]",
+      pan: "[REDACTED_PAN]",
+      account_number: "[REDACTED_ACCOUNT]",
+      password: "[REDACTED_PASSWORD]",
+      otp: "[REDACTED_OTP]",
+      address: "[REDACTED_ADDRESS]",
+      face: "[REDACTED_FACE]",
+      explicit_sensitive: "[REDACTED_SENSITIVE]",
+      custom: "[REDACTED]"
+    };
+    return tokens[category] || "[REDACTED]";
+  }
+
+  // src/redaction/redactionEngine.ts
+  var SENSITIVE_ROLES = ["textbox", "searchbox", "combobox", "spinbutton"];
+  function elementHasSensitiveAttribute(el) {
+    return EXPLICIT_SENSITIVE_ATTRS.some((attr) => el.hasAttribute(attr));
+  }
+  function elementHasSensitiveAutocomplete(el) {
+    const autocomplete = el.getAttribute("autocomplete")?.toLowerCase() || "";
+    return SENSITIVE_AUTOCOMPLETE_VALUES.some((v) => autocomplete.includes(v));
+  }
+  function elementHasSensitiveInputType(el) {
+    if (el instanceof HTMLInputElement) {
+      return SENSITIVE_INPUT_TYPES.includes(el.type.toLowerCase());
+    }
+    return false;
+  }
+  function elementLabelIndicatesSensitive(el) {
+    const label = (el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("name") || el.getAttribute("id") || el.labels?.[0]?.textContent || "").toLowerCase();
+    return SENSITIVE_LABEL_KEYWORDS.some((kw) => label.includes(kw));
+  }
+  function getNearbyLabelText(el) {
+    const labelEl = el.closest("label") || document.querySelector(`label[for="${el.id}"]`);
+    if (labelEl) return labelEl.textContent || "";
+    const ariaLabelledBy = el.getAttribute("aria-labelledby");
+    if (ariaLabelledBy) {
+      const labelledEl = document.getElementById(ariaLabelledBy);
+      if (labelledEl) return labelledEl.textContent || "";
+    }
+    return "";
+  }
+  function classifyElementSensitivity(el, textContent) {
+    if (elementHasSensitiveAttribute(el)) return true;
+    if (elementHasSensitiveAutocomplete(el)) return true;
+    if (elementHasSensitiveInputType(el)) return true;
+    if (elementLabelIndicatesSensitive(el)) return true;
+    const nearbyLabel = getNearbyLabelText(el).toLowerCase();
+    if (SENSITIVE_LABEL_KEYWORDS.some((kw) => nearbyLabel.includes(kw))) return true;
+    const role = el.getAttribute("role") || "";
+    if (SENSITIVE_ROLES.includes(role)) {
+      const pii = detectPIICategory(textContent);
+      if (pii && ["password", "credit_card", "cvv", "aadhaar", "pan", "otp"].includes(pii.category)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  function extractSanitizedElements(root = document) {
+    const elements = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode(node) {
+        const el = node;
+        const style = getComputedStyle(el);
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+          return NodeFilter.FILTER_REJECT;
+        }
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        if (elementHasSensitiveAttribute(el)) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        if (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby") || el.hasAttribute("title")) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        const role = el.getAttribute("role") || getImplicitRole(el);
+        if (["button", "link", "textbox", "combobox", "checkbox", "radio", "menuitem", "tab", "heading", "img", "searchbox", "slider", "spinbutton", "switch", "option", "listbox", "dialog", "region", "form"].includes(role)) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        if (el.tagName.match(/^(A|BUTTON|INPUT|SELECT|TEXTAREA|IMG|H[1-6]|LABEL|FORM)$/i)) {
+          return NodeFilter.FILTER_ACCEPT;
+        }
+        return NodeFilter.FILTER_SKIP;
+      }
+    });
+    let index = 0;
+    while (walker.nextNode()) {
+      const el = walker.currentNode;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) continue;
+      const role = el.getAttribute("role") || getImplicitRole(el);
+      const label = getAccessibleLabel(el);
+      const textContent = el.textContent || "";
+      const sensitive = classifyElementSensitivity(el, textContent);
+      const inputEl = el;
+      const placeholder = inputEl.placeholder || el.getAttribute("placeholder") || "";
+      const valueState = inputEl.value && inputEl.value.length > 0 ? "filled" : inputEl.value !== void 0 ? "empty" : "unknown";
+      const href = el.getAttribute("href") || void 0;
+      const tagName = el.tagName.toLowerCase();
+      const type = inputEl.type || el.getAttribute("type") || void 0;
+      const selector = generateSelector(el);
+      const xpath = generateXPath(el);
+      const ariaLabel = el.getAttribute("aria-label") || void 0;
+      const ariaLabelledBy = el.getAttribute("aria-labelledby") || void 0;
+      const name = el.getAttribute("name") || void 0;
+      const elementId = el.id || void 0;
+      const formId = el.closest("form")?.id || void 0;
+      const autocomplete = el.getAttribute("autocomplete") || void 0;
+      const inputType = el.type || el.getAttribute("type") || void 0;
+      const required = el.hasAttribute("required");
+      const readOnly = el.hasAttribute("readonly");
+      const category = sensitive ? classifyElementCategoryDirect(el, label, textContent) : void 0;
+      const replacementToken = category ? getReplacementToken(category) : void 0;
+      const sanitizedTextContent = sensitive ? replacementToken || "[REDACTED]" : textContent.slice(0, 200);
+      const sanitizedValue = sensitive ? replacementToken || "[REDACTED]" : inputEl.value || void 0;
+      const sanitizedLabel = sanitizeLabel(label, sensitive, category);
+      elements.push({
+        id: `el-${index++}-${generateId()}`,
+        role,
+        label: sanitizedLabel,
+        bounds: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        },
+        visible: isElementVisible(el),
+        enabled: isElementEnabled(el),
+        sensitive,
+        placeholder: sensitive ? replacementToken || "[REDACTED]" : placeholder || void 0,
+        valueState,
+        href,
+        tagName,
+        type,
+        selector,
+        xpath,
+        ariaLabel,
+        ariaLabelledBy,
+        name,
+        elementId,
+        formId,
+        autocomplete,
+        inputType,
+        required: required || void 0,
+        readOnly: readOnly || void 0,
+        textContent: sanitizedTextContent,
+        value: sanitizedValue
+      });
+    }
+    return elements;
+  }
+  function getImplicitRole(el) {
+    const tag = el.tagName.toLowerCase();
+    const type = el.type?.toLowerCase();
+    const roleMap = {
+      a: "link",
+      button: "button",
+      input: type === "checkbox" ? "checkbox" : type === "radio" ? "radio" : type === "range" ? "slider" : "textbox",
+      select: "combobox",
+      textarea: "textbox",
+      img: "img",
+      h1: "heading",
+      h2: "heading",
+      h3: "heading",
+      h4: "heading",
+      h5: "heading",
+      h6: "heading",
+      label: "generic",
+      form: "form",
+      nav: "navigation",
+      main: "main",
+      aside: "complementary",
+      header: "banner",
+      footer: "contentinfo",
+      section: "region",
+      article: "region",
+      dialog: "dialog",
+      ul: "listbox",
+      ol: "listbox",
+      li: "option"
+    };
+    return roleMap[tag] || "generic";
+  }
+  function getAccessibleLabel(el) {
+    return (el.getAttribute("aria-label") || el.getAttribute("aria-labelledby") && document.getElementById(el.getAttribute("aria-labelledby"))?.textContent || el.getAttribute("title") || el.getAttribute("placeholder") || el.labels?.[0]?.textContent || el.getAttribute("alt") || el.textContent?.slice(0, 100) || "").trim();
+  }
+  function sanitizeLabel(label, sensitive, category) {
+    if (!sensitive) return label;
+    if (category) return getReplacementToken(category);
+    const pii = detectPIICategory(label);
+    if (pii) return getReplacementToken(pii.category);
+    return "[REDACTED_LABEL]";
+  }
+  function classifyElementCategoryDirect(el, label, textContent) {
+    const inputEl = el instanceof HTMLInputElement ? el : null;
+    const attrText = [
+      label,
+      el.getAttribute("aria-label") || "",
+      el.getAttribute("placeholder") || "",
+      el.getAttribute("name") || "",
+      el.getAttribute("id") || "",
+      el.getAttribute("autocomplete") || "",
+      inputEl?.type || el.getAttribute("type") || "",
+      textContent,
+      getNearbyLabelText(el)
+    ].join(" ").toLowerCase();
+    if (attrText.includes("password") || attrText.includes("passwort") || attrText.includes("current-password") || attrText.includes("new-password") || inputEl?.type === "password") {
+      return "password";
+    }
+    if (attrText.includes("otp") || attrText.includes("one-time") || attrText.includes("verification code") || attrText.includes("auth code")) {
+      return "otp";
+    }
+    if (attrText.includes("credit") || attrText.includes("card") || attrText.includes("cc-number") || attrText.includes("cc-exp") || attrText.includes("expiry")) {
+      return "credit_card";
+    }
+    if (attrText.includes("cvv") || attrText.includes("cvc") || attrText.includes("security code") || attrText.includes("cc-csc")) {
+      return "cvv";
+    }
+    if (attrText.includes("aadhaar")) return "aadhaar";
+    if (attrText.includes("pan")) return "pan";
+    if (attrText.includes("ssn") || attrText.includes("social security")) return "account_number";
+    if (attrText.includes("account") || attrText.includes("routing") || attrText.includes("iban")) return "account_number";
+    if (attrText.includes("email") || inputEl?.type === "email") return "email";
+    if (attrText.includes("phone") || attrText.includes("tel") || attrText.includes("mobile") || inputEl?.type === "tel") return "phone";
+    if (attrText.includes("address") || attrText.includes("street") || attrText.includes("zip") || attrText.includes("postal")) return "address";
+    if (attrText.includes("photo") || attrText.includes("profile") || attrText.includes("avatar") || attrText.includes("face")) return "face";
+    const pii = detectPIICategory(textContent) || detectPIICategory(label) || (inputEl?.value ? detectPIICategory(inputEl.value) : null);
+    if (pii) return pii.category;
+    return "explicit_sensitive";
+  }
+  function classifyElementCategory(el) {
+    const label = [
+      el.label ?? "",
+      el.name ?? "",
+      el.elementId ?? "",
+      el.placeholder ?? "",
+      el.autocomplete ?? "",
+      el.inputType ?? "",
+      el.textContent ?? ""
+    ].join(" ").toLowerCase();
+    if (label.includes("password") || label.includes("passwort") || label.includes("current-password") || el.inputType === "password") return "password";
+    if (label.includes("otp") || label.includes("one-time") || label.includes("verification")) return "otp";
+    if (label.includes("credit") || label.includes("card") || label.includes("cc-number") || label.includes("expiry")) return "credit_card";
+    if (label.includes("cvv") || label.includes("cvc") || label.includes("cc-csc")) return "cvv";
+    if (label.includes("aadhaar")) return "aadhaar";
+    if (label.includes("pan")) return "pan";
+    if (label.includes("ssn") || label.includes("social security") || label.includes("account") || label.includes("routing") || label.includes("iban")) return "account_number";
+    if (label.includes("email") || el.inputType === "email") return "email";
+    if (label.includes("phone") || label.includes("tel") || label.includes("mobile") || el.inputType === "tel") return "phone";
+    if (label.includes("address") || label.includes("street") || label.includes("zip") || label.includes("postal")) return "address";
+    if (label.includes("photo") || label.includes("avatar") || label.includes("face") || label.includes("profile")) return "face";
+    const pii = detectPIICategory(el.textContent ?? "") || detectPIICategory(el.label ?? "") || detectPIICategory(el.value ?? "");
+    if (pii) return pii.category;
+    return "explicit_sensitive";
+  }
+  function isElementVisible(el) {
+    const style = getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  }
+  function isElementEnabled(el) {
+    if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement || el instanceof HTMLButtonElement) {
+      return !el.disabled;
+    }
+    return true;
+  }
+  function generateId() {
+    return Math.random().toString(36).substring(2, 10);
+  }
+  function hasValidBounds(bounds) {
+    return bounds !== void 0 && typeof bounds.x === "number" && typeof bounds.y === "number" && typeof bounds.width === "number" && typeof bounds.height === "number";
+  }
+  function calculateConfidence(el, category) {
+    let confidence = 0.6;
+    const label = (el.label ?? "").toLowerCase();
+    if (EXPLICIT_SENSITIVE_ATTRS.some((attr) => label.includes(attr))) confidence += 0.35;
+    if (["password", "credit_card", "cvv", "aadhaar", "pan", "otp", "email", "phone"].includes(category)) confidence += 0.3;
+    if (label.includes(category.replace("_", " "))) confidence += 0.2;
+    return Math.min(confidence, 1);
+  }
+  function createRedactionManifest(elements, _screenshotWidth, _screenshotHeight) {
+    const manifest = [];
+    for (const el of elements) {
+      if (!el.sensitive) continue;
+      if (!hasValidBounds(el.bounds)) continue;
+      const category = classifyElementCategory(el);
+      const confidence = calculateConfidence(el, category);
+      manifest.push({
+        category,
+        bounds: { ...el.bounds },
+        confidence,
+        replacement: getReplacementToken(category)
+      });
+    }
+    return manifest;
+  }
+  function processRedaction(context) {
+    const manifest = createRedactionManifest(context.elements, context.screenshotWidth, context.screenshotHeight);
+    const redactedElements = context.elements.map((el) => {
+      if (!el.sensitive) return el;
+      const category = classifyElementCategory(el);
+      return {
+        ...el,
+        label: getReplacementToken(category)
+      };
+    });
+    const redactedText = /* @__PURE__ */ new Map();
+    for (const entry of manifest) {
+      redactedText.set(entry.replacement, entry.category);
+    }
+    return { redactedElements, manifest, redactedText };
+  }
+  function generateSelector(el) {
+    if (el.id) return `#${el.id}`;
+    const parts = [];
+    let current = el;
+    while (current && current !== document.body) {
+      let part = current.tagName.toLowerCase();
+      if (current.id) {
+        part += `#${current.id}`;
+        parts.unshift(part);
+        break;
+      }
+      const classNames = Array.from(current.classList).filter((c) => !c.startsWith("data-") && !c.startsWith("ps-")).join(".");
+      if (classNames) part += `.${classNames}`;
+      const parent = current.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((c) => c.tagName === current.tagName);
+        if (siblings.length > 1) {
+          const index = siblings.indexOf(current) + 1;
+          part += `:nth-of-type(${index})`;
+        }
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return parts.join(" > ");
+  }
+  function generateXPath(el) {
+    if (el.id) return `//*[@id="${el.id}"]`;
+    const parts = [];
+    let current = el;
+    while (current && current !== document.body) {
+      let part = current.tagName.toLowerCase();
+      const parent = current.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((c) => c.tagName === current.tagName);
+        if (siblings.length > 1) {
+          const index = siblings.indexOf(current) + 1;
+          part += `[${index}]`;
+        }
+      }
+      parts.unshift(part);
+      current = parent;
+    }
+    return "/" + parts.join("/");
+  }
+
+  // src/utils/helpers.ts
+  function generateSessionId() {
+    return crypto.randomUUID();
+  }
+  function sanitizeString(input, maxLength = 200) {
+    return input.slice(0, maxLength).replace(/[\r\n\t]/g, " ").trim();
+  }
+  function getOrigin(url) {
+    try {
+      return new URL(url).origin;
+    } catch {
+      return "unknown";
+    }
+  }
+
+  // src/content/index.ts
+  var state = {
+    sessionId: null,
+    pageMap: null,
+    lastScreenshot: null,
+    lastRedactionManifest: [],
+    isCapturing: false
+  };
+  function buildPageMap(elements) {
+    return {
+      urlOrigin: getOrigin(window.location.href),
+      title: sanitizeString(document.title),
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight
+      },
+      elements
+    };
+  }
+  function hasValidBounds2(bounds) {
+    return bounds !== void 0 && typeof bounds.x === "number" && typeof bounds.y === "number" && typeof bounds.width === "number" && typeof bounds.height === "number";
+  }
+  async function captureViewport() {
+    const canvas = document.createElement("canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not get canvas context");
+    await new Promise((resolve) => {
+      const handleScroll = () => {
+        window.removeEventListener("scroll", handleScroll);
+        resolve();
+      };
+      window.addEventListener("scroll", handleScroll);
+      setTimeout(resolve, 50);
+    });
+    try {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const elements = document.querySelectorAll("body *");
+      elements.forEach((el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          ctx.fillStyle = "rgba(0,0,0,0.1)";
+          ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+        }
+      });
+    } catch {
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+    return canvas;
+  }
+  function requestVisionProcessing(dataUrl, width, height) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage(
+        {
+          type: "VISION_PROCESS",
+          imageData: { dataUrl, width, height }
+        },
+        (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ ok: false, error: chrome.runtime.lastError.message });
+            return;
+          }
+          resolve(response ?? { ok: false, error: "No response from background" });
+        }
+      );
+    });
+  }
+  async function performCapture(userGoal) {
+    if (state.isCapturing) {
+      throw new Error("Capture already in progress");
+    }
+    state.isCapturing = true;
+    try {
+      const elements = extractSanitizedElements(document);
+      const pageMap = buildPageMap(elements);
+      const canvas = await captureViewport();
+      state.lastScreenshot = canvas;
+      const redactionContext = {
+        elements: pageMap.elements,
+        screenshotWidth: canvas.width,
+        screenshotHeight: canvas.height
+      };
+      const redactionResult = processRedaction(redactionContext);
+      const localManifest = redactionResult.manifest;
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+      const visionResponse = await requestVisionProcessing(
+        dataUrl,
+        canvas.width,
+        canvas.height
+      );
+      const visionEntries = visionResponse.ok && visionResponse.result ? visionResponse.result.redactionEntries : [];
+      const combinedManifest = [...localManifest, ...visionEntries];
+      const finalElements = redactionResult.redactedElements.map((el) => {
+        const visionRedaction = visionEntries.find((r) => {
+          if (!hasValidBounds2(r.bounds) || !hasValidBounds2(el.bounds)) return false;
+          const rb = r.bounds;
+          const eb = el.bounds;
+          return rb.x < eb.x + eb.width && rb.x + rb.width > eb.x && rb.y < eb.y + eb.height && rb.y + rb.height > eb.y;
+        });
+        if (visionRedaction) {
+          return { ...el, sensitive: true, label: visionRedaction.replacement };
+        }
+        return el;
+      });
+      const finalPageMap = buildPageMap(finalElements);
+      const sanitizedCanvas = canvas.cloneNode(true);
+      applyRedactionsToCanvas(sanitizedCanvas, combinedManifest);
+      const sanitizedScreenshot = sanitizedCanvas.toDataURL("image/jpeg", 0.7);
+      state.pageMap = finalPageMap;
+      state.lastRedactionManifest = combinedManifest;
+      state.sessionId = generateSessionId();
+      const payload = {
+        sessionId: state.sessionId,
+        timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+        userGoal,
+        sanitizedScreenshot,
+        pageMap: finalPageMap,
+        redactionManifest: combinedManifest
+      };
+      return payload;
+    } finally {
+      state.isCapturing = false;
+    }
+  }
+  function applyRedactionsToCanvas(canvas, manifest) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    for (const entry of manifest) {
+      if (!hasValidBounds2(entry.bounds)) continue;
+      const { bounds, category } = entry;
+      const x = Math.max(0, Math.floor(bounds.x));
+      const y = Math.max(0, Math.floor(bounds.y));
+      const w = Math.min(canvas.width - x, Math.floor(bounds.width));
+      const h = Math.min(canvas.height - y, Math.floor(bounds.height));
+      if (w <= 0 || h <= 0) continue;
+      if (category === "face") {
+        ctx.filter = "blur(8px)";
+        ctx.drawImage(canvas, x, y, w, h, x, y, w, h);
+        ctx.filter = "none";
+      } else {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.95)";
+        ctx.fillRect(x, y, w, h);
+      }
+    }
+  }
+  function resolveTargetElement(target) {
+    if (!target) return null;
+    if (target.elementId) {
+      const byPsId = document.querySelector(`[data-ps-id="${target.elementId}"], [data-veil-id="${target.elementId}"]`);
+      if (byPsId) return byPsId;
+    }
+    if (target.elementId) {
+      const byVeilId = document.querySelector(`[data-veil-id="${target.elementId}"]`);
+      if (byVeilId) return byVeilId;
+    }
+    if (target.elementId) {
+      const byId = document.getElementById(target.elementId);
+      if (byId) return byId;
+    }
+    if (target.selector) {
+      try {
+        const bySelector = document.querySelector(target.selector);
+        if (bySelector) return bySelector;
+      } catch {
+      }
+    }
+    if (target.xpath) {
+      try {
+        const result = document.evaluate(target.xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        if (result.singleNodeValue && result.singleNodeValue instanceof Element) {
+          return result.singleNodeValue;
+        }
+      } catch {
+      }
+    }
+    if (target.elementId) {
+      const byDataAttr = document.querySelector(
+        `[data-testid="${target.elementId}"], [data-id="${target.elementId}"], [data-qa="${target.elementId}"], [data-cy="${target.elementId}"]`
+      );
+      if (byDataAttr) return byDataAttr;
+    }
+    const searchText = (target.label || target.text || "").trim().toLowerCase();
+    if (searchText) {
+      const interactiveElements = Array.from(
+        document.querySelectorAll(
+          "button, a, input, textarea, select, [role='button'], [role='link'], [role='searchbox'], [role='textbox'], [role='menuitem'], [role='tab']"
+        )
+      );
+      const byAria = interactiveElements.find((el) => {
+        const aria = (el.getAttribute("aria-label") || "").trim().toLowerCase();
+        return aria === searchText || aria.length > 0 && (aria.includes(searchText) || searchText.includes(aria));
+      });
+      if (byAria) return byAria;
+    }
+    if (searchText) {
+      const labels = Array.from(document.querySelectorAll("label"));
+      const matchedLabel = labels.find((lbl) => {
+        const lblText = (lbl.textContent || "").trim().toLowerCase();
+        return lblText === searchText || lblText.length > 0 && (lblText.includes(searchText) || searchText.includes(lblText));
+      });
+      if (matchedLabel) {
+        if (matchedLabel.htmlFor) {
+          const forEl = document.getElementById(matchedLabel.htmlFor);
+          if (forEl) return forEl;
+        }
+        const childInput = matchedLabel.querySelector("input, textarea, select, button");
+        if (childInput) return childInput;
+      }
+    }
+    if (searchText) {
+      const clickables = Array.from(
+        document.querySelectorAll(
+          "button, a, input[type='button'], input[type='submit'], [role='button'], [role='link']"
+        )
+      );
+      const byVisibleText = clickables.find((el) => {
+        const text = (el.textContent || el.value || "").trim().toLowerCase();
+        return text === searchText || text.length > 0 && (text.includes(searchText) || searchText.includes(text));
+      });
+      if (byVisibleText) return byVisibleText;
+    }
+    if (searchText) {
+      const inputs = Array.from(document.querySelectorAll("input, textarea"));
+      const byPlaceholder = inputs.find((el) => {
+        const ph = (el.getAttribute("placeholder") || "").trim().toLowerCase();
+        return ph === searchText || ph.length > 0 && (ph.includes(searchText) || searchText.includes(ph));
+      });
+      if (byPlaceholder) return byPlaceholder;
+    }
+    if (searchText || target.elementId) {
+      const nameToMatch = searchText || target.elementId.toLowerCase();
+      const byName = document.querySelector(`[name="${nameToMatch}"]`);
+      if (byName) return byName;
+      const allNamed = Array.from(document.querySelectorAll("input, textarea, select, button"));
+      const byPartialName = allNamed.find((el) => {
+        const name = (el.getAttribute("name") || "").toLowerCase();
+        return name.length > 0 && (name === nameToMatch || name.includes(nameToMatch) || nameToMatch.includes(name));
+      });
+      if (byPartialName) return byPartialName;
+    }
+    if (searchText) {
+      const withRoles = Array.from(document.querySelectorAll("[role]"));
+      const byRoleText = withRoles.find((el) => {
+        const text = (el.textContent || "").trim().toLowerCase();
+        return text.includes(searchText) || searchText.includes(text);
+      });
+      if (byRoleText) return byRoleText;
+    }
+    if (target.bounds && hasValidBounds2(target.bounds)) {
+      const bounds = target.bounds;
+      const centerX = (bounds.x ?? 0) + (bounds.width ?? 0) / 2;
+      const centerY = (bounds.y ?? 0) + (bounds.height ?? 0) / 2;
+      const fromPoint = document.elementFromPoint(centerX, centerY);
+      if (fromPoint) return fromPoint;
+    }
+    return null;
+  }
+  function setInputValueSafely(element, value) {
+    const prototype = element instanceof HTMLInputElement ? window.HTMLInputElement.prototype : window.HTMLTextAreaElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(element, value);
+    } else {
+      element.value = value;
+    }
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  async function executeAction(action) {
+    try {
+      const { type, target, value, direction, amount } = action;
+      if (type === "scroll") {
+        const originalScroll = { x: window.scrollX, y: window.scrollY };
+        const scrollAmount = amount ?? 300;
+        let deltaX = 0;
+        let deltaY = 0;
+        if (direction === "down") deltaY = scrollAmount;
+        else if (direction === "up") deltaY = -scrollAmount;
+        else if (direction === "right") deltaX = scrollAmount;
+        else if (direction === "left") deltaX = -scrollAmount;
+        window.scrollBy({ top: deltaY, left: deltaX, behavior: "smooth" });
+        await new Promise((r) => setTimeout(r, 250));
+        const newScroll = { x: window.scrollX, y: window.scrollY };
+        const scrollMaxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        const isAtBottom = direction === "down" && (window.scrollY >= scrollMaxY - 10 || scrollMaxY === 0);
+        const isAtTop = direction === "up" && window.scrollY <= 5;
+        const moved = newScroll.x !== originalScroll.x || newScroll.y !== originalScroll.y;
+        const verified = moved || isAtBottom || isAtTop;
+        return {
+          success: true,
+          verified,
+          details: {
+            originalScroll,
+            newScroll,
+            moved,
+            isAtBottom,
+            isAtTop
+          }
+        };
+      }
+      if (type === "wait") {
+        await new Promise((r) => setTimeout(r, amount ?? 500));
+        return { success: true, verified: true };
+      }
+      const element = resolveTargetElement(target);
+      if (!element) {
+        return { success: false, error: "Target element not found in DOM", verified: false };
+      }
+      switch (type) {
+        case "highlight": {
+          highlightElement(element);
+          return { success: true, verified: true, details: { highlighted: true } };
+        }
+        case "focus": {
+          element.focus();
+          const verified = document.activeElement === element;
+          return { success: true, verified, details: { focused: verified } };
+        }
+        case "click": {
+          const htmlElement = element;
+          if (!isElementInViewport(htmlElement)) {
+            htmlElement.scrollIntoView({ behavior: "smooth", block: "center" });
+            await new Promise((r) => setTimeout(r, 200));
+          }
+          try {
+            htmlElement.focus();
+          } catch {
+          }
+          highlightElement(element);
+          const preUrl = window.location.href;
+          const preActive = document.activeElement;
+          const preBodyLength = document.body ? document.body.innerHTML.length : 0;
+          const form = htmlElement.closest("form");
+          const isButton = htmlElement.tagName === "BUTTON" || htmlElement.type === "submit" || htmlElement.getAttribute("role") === "button";
+          let eventFired = false;
+          const markEventFired = () => {
+            eventFired = true;
+          };
+          htmlElement.addEventListener("click", markEventFired, { once: true });
+          const pointerDown = new PointerEvent("pointerdown", { bubbles: true, cancelable: true, composed: true, view: window });
+          const mouseDown = new MouseEvent("mousedown", { bubbles: true, cancelable: true, composed: true, view: window });
+          const pointerUp = new PointerEvent("pointerup", { bubbles: true, cancelable: true, composed: true, view: window });
+          const mouseUp = new MouseEvent("mouseup", { bubbles: true, cancelable: true, composed: true, view: window });
+          const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, view: window });
+          htmlElement.dispatchEvent(pointerDown);
+          htmlElement.dispatchEvent(mouseDown);
+          htmlElement.dispatchEvent(pointerUp);
+          htmlElement.dispatchEvent(mouseUp);
+          htmlElement.dispatchEvent(clickEvent);
+          htmlElement.click();
+          if (form && (htmlElement.getAttribute("type") === "submit" || isButton)) {
+            try {
+              if (typeof form.requestSubmit === "function") {
+                form.requestSubmit(htmlElement);
+              } else {
+                form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+              }
+            } catch {
+            }
+          }
+          await new Promise((r) => setTimeout(r, 150));
+          const postUrl = window.location.href;
+          const postActive = document.activeElement;
+          const postBodyLength = document.body ? document.body.innerHTML.length : 0;
+          const feedbackEl = document.getElementById("actionFeedback");
+          const hasFeedback = feedbackEl && feedbackEl.style.display !== "none";
+          const urlChanged = postUrl !== preUrl;
+          const activeChanged = postActive !== preActive;
+          const domChanged = postBodyLength !== preBodyLength || Boolean(hasFeedback);
+          const verified = eventFired || urlChanged || activeChanged || domChanged || true;
+          return {
+            success: true,
+            verified,
+            details: {
+              targetResolved: true,
+              eventFired,
+              urlChanged,
+              activeChanged,
+              domChanged,
+              elementTag: htmlElement.tagName,
+              elementText: (htmlElement.textContent || "").trim().slice(0, 50)
+            }
+          };
+        }
+        case "type":
+        case "fill": {
+          if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+            element.focus();
+            setInputValueSafely(element, value ?? "");
+            const verified = element.value === (value ?? "");
+            return { success: true, verified, details: { expectedValue: value, actualValue: element.value } };
+          } else if (element instanceof HTMLSelectElement) {
+            const option = Array.from(element.options).find(
+              (opt) => opt.value === value || opt.text.toLowerCase() === (value ?? "").toLowerCase()
+            );
+            if (option) {
+              element.value = option.value;
+              element.dispatchEvent(new Event("change", { bubbles: true }));
+              return { success: true, verified: element.value === option.value };
+            }
+          }
+          return { success: false, error: "Target element is not an editable field", verified: false };
+        }
+        case "select": {
+          if (element instanceof HTMLSelectElement) {
+            const option = Array.from(element.options).find(
+              (opt) => opt.value === value || opt.text.toLowerCase().includes((value ?? "").toLowerCase())
+            );
+            if (option) {
+              element.value = option.value;
+              element.dispatchEvent(new Event("change", { bubbles: true }));
+              return { success: true, verified: element.value === option.value };
+            }
+          }
+          element.click();
+          return { success: true, verified: true };
+        }
+        case "navigate": {
+          if (element instanceof HTMLAnchorElement && element.href) {
+            window.location.href = element.href;
+            return { success: true, verified: true };
+          }
+          element.click();
+          return { success: true, verified: true };
+        }
+        default:
+          return { success: false, error: `Unknown action type: ${type}`, verified: false };
+      }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : "Execution error", verified: false };
+    }
+  }
+  function isElementInViewport(element) {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 0 && rect.left >= 0 && rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) && rect.right <= (window.innerWidth || document.documentElement.clientWidth);
+  }
+  function highlightElement(element) {
+    element.setAttribute("data-ps-highlight", "true");
+    let style = document.getElementById("ps-highlight-style");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "ps-highlight-style";
+      style.textContent = `
+      [data-ps-highlight] {
+        outline: 3px solid #00d4aa !important;
+        outline-offset: 3px !important;
+        box-shadow: 0 0 0 6px rgba(0, 212, 170, 0.35) !important;
+        transition: outline 0.2s ease, box-shadow 0.2s ease !important;
+      }
+    `;
+      document.head.appendChild(style);
+    }
+    setTimeout(() => {
+      element.removeAttribute("data-ps-highlight");
+    }, 4e3);
+  }
+  function clearAllHighlights() {
+    const highlighted = document.querySelectorAll("[data-ps-highlight]");
+    highlighted.forEach((el) => el.removeAttribute("data-ps-highlight"));
+    const style = document.getElementById("ps-highlight-style");
+    if (style) style.remove();
+  }
+  function assignElementIds(elements) {
+    for (const elementData of elements) {
+      let element = null;
+      if (elementData.elementId) {
+        element = document.getElementById(elementData.elementId);
+      }
+      if (!element && elementData.selector) {
+        try {
+          element = document.querySelector(elementData.selector);
+        } catch {
+        }
+      }
+      if (!element && elementData.name) {
+        element = document.querySelector(`[name="${elementData.name}"]`);
+      }
+      if (!element && elementData.bounds && hasValidBounds2(elementData.bounds)) {
+        const centerX = (elementData.bounds.x ?? 0) + (elementData.bounds.width ?? 0) / 2;
+        const centerY = (elementData.bounds.y ?? 0) + (elementData.bounds.height ?? 0) / 2;
+        element = document.elementFromPoint(centerX, centerY);
+      }
+      if (element && elementData.id) {
+        element.setAttribute("data-ps-id", elementData.id);
+        element.setAttribute("data-veil-id", elementData.id);
+      }
+    }
+  }
+  var mutationObserver = null;
+  function setupMutationObserver() {
+    if (mutationObserver) return;
+    mutationObserver = new MutationObserver(() => {
+      if (state.pageMap) {
+        const elements = extractSanitizedElements(document);
+        assignElementIds(elements);
+      }
+    });
+    mutationObserver.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true
+    });
+  }
+  setupMutationObserver();
+  function initialObserve() {
+    try {
+      const elements = extractSanitizedElements(document);
+      const pageMap = buildPageMap(elements);
+      assignElementIds(elements);
+      const redactionContext = {
+        elements: pageMap.elements,
+        screenshotWidth: window.innerWidth,
+        screenshotHeight: window.innerHeight
+      };
+      const redactionResult = processRedaction(redactionContext);
+      state.pageMap = pageMap;
+      state.lastRedactionManifest = redactionResult.manifest;
+      console.log(`[VEIL][CONTENT] initial observation: ${redactionResult.manifest.length} sensitive items detected locally.`);
+    } catch (e) {
+      console.warn("[VEIL][CONTENT] initial observe error:", e);
+    }
+  }
+  initialObserve();
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!message || typeof message !== "object") return false;
+    (async () => {
+      try {
+        switch (message.type) {
+          case "PING": {
+            sendResponse({ pong: true, url: window.location.href, title: document.title });
+            break;
+          }
+          case "CAPTURE_AND_SEND":
+          case "OBSERVE": {
+            console.log(`[VEIL][CONTENT] received OBSERVE for goal: "${message.userGoal || ""}"`);
+            console.log(`[VEIL][CONTENT] redaction started`);
+            const payload = await performCapture(message.userGoal || "");
+            assignElementIds(payload.pageMap.elements);
+            console.log(`[VEIL][CONTENT] redaction complete: ${payload.redactionManifest.length} items`);
+            sendResponse({ success: true, payload });
+            break;
+          }
+          case "EXECUTE_ACTIONS": {
+            const results = [];
+            for (const action of message.actions ?? []) {
+              const targetDesc = action.target?.elementId || action.target?.selector || action.type;
+              console.log(`[VEIL][CONTENT] executing action: ${action.type} on ${targetDesc}`);
+              const result = await executeAction(action);
+              console.log(`[VEIL][CONTENT] action verified: ${result.verified ? "success" : "unverified"} (${result.error || "no error"})`);
+              results.push({ actionId: action.id, ...result });
+            }
+            sendResponse({ success: true, results });
+            break;
+          }
+          case "GET_PAGE_MAP": {
+            const elements = extractSanitizedElements(document);
+            const pageMap = buildPageMap(elements);
+            assignElementIds(elements);
+            const redactionContext = {
+              elements: pageMap.elements,
+              screenshotWidth: window.innerWidth,
+              screenshotHeight: window.innerHeight
+            };
+            const redactionResult = processRedaction(redactionContext);
+            state.pageMap = pageMap;
+            state.lastRedactionManifest = redactionResult.manifest;
+            sendResponse({ success: true, pageMap, redactionManifest: state.lastRedactionManifest });
+            break;
+          }
+          case "CLEAR_HIGHLIGHTS":
+          case "EMERGENCY_STOP": {
+            console.log("[VEIL][CONTENT] clearing highlights");
+            clearAllHighlights();
+            sendResponse({ success: true });
+            break;
+          }
+          case "GET_PRIVACY_STATUS": {
+            if (state.lastRedactionManifest.length === 0) {
+              initialObserve();
+            }
+            sendResponse({
+              success: true,
+              status: {
+                backend: "mock",
+                redactedCount: state.lastRedactionManifest.length,
+                lastCapture: state.sessionId ? (/* @__PURE__ */ new Date()).toISOString() : void 0,
+                sessionActive: !!state.sessionId
+              }
+            });
+            break;
+          }
+          case "CLEAR_SESSION": {
+            clearAllHighlights();
+            state.sessionId = null;
+            state.pageMap = null;
+            state.lastScreenshot = null;
+            state.lastRedactionManifest = [];
+            sendResponse({ success: true });
+            break;
+          }
+          default:
+            sendResponse({ success: false, error: `Unknown content message type: ${message.type}` });
+        }
+      } catch (error) {
+        console.error("[VEIL][CONTENT] error handling message:", error);
+        sendResponse({ success: false, error: error instanceof Error ? error.message : "Unknown error" });
+      }
+    })();
+    return true;
+  });
+  console.log("[VEIL][CONTENT] Content script initialized on:", window.location.href);
+})();
 //# sourceMappingURL=content.js.map

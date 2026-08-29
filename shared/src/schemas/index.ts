@@ -1,5 +1,46 @@
 import { z } from "zod";
 
+export type GoalMode =
+  | "information"
+  | "informational"
+  | "find"
+  | "highlight"
+  | "fill"
+  | "click"
+  | "select"
+  | "type"
+  | "search"
+  | "scroll"
+  | "navigate"
+  | "navigation_task"
+  | "submit"
+  | "delete"
+  | "ambiguous"
+  | "unsupported"
+  | "browser_action"
+  | "form_task";
+
+export type ActionRiskLevel = "low" | "medium" | "high";
+
+export interface GoalIntent {
+  action?: string;
+  target?: string;
+  value?: string;
+  risk?: ActionRiskLevel;
+  requiresConfirmation?: boolean;
+}
+
+export interface GoalClassification {
+  mode: GoalMode;
+  confidence: number;
+  interpretation: string;
+  extractedIntent?: GoalIntent;
+  requiresClarification: boolean;
+  clarificationQuestion?: string;
+  riskLevel?: ActionRiskLevel;
+  requiresConfirmation?: boolean;
+}
+
 export const BoundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -50,6 +91,30 @@ export const SanitizedElementSchema = z.object({
   visible: z.boolean(),
   enabled: z.boolean(),
   sensitive: z.boolean(),
+  placeholder: z.string().optional(),
+  valueState: z.enum(["empty", "filled", "unknown"]).optional(),
+  href: z.string().optional(),
+  tagName: z.string().optional(),
+  type: z.string().optional(),
+  // Robust locator fields
+  selector: z.string().optional(),
+  xpath: z.string().optional(),
+  ariaLabel: z.string().optional(),
+  ariaLabelledBy: z.string().optional(),
+  name: z.string().optional(),
+  elementId: z.string().optional(),
+  formId: z.string().optional(),
+  autocomplete: z.string().optional(),
+  inputType: z.string().optional(),
+  required: z.boolean().optional(),
+  readOnly: z.boolean().optional(),
+  // Text content (sanitized)
+  textContent: z.string().optional(),
+  value: z.string().optional(),
+  // Vision / perception fusion fields
+  domConfidence: z.number().min(0).max(1).optional(),
+  visionConfidence: z.number().min(0).max(1).optional(),
+  combinedConfidence: z.number().min(0).max(1).optional(),
 });
 
 export type SanitizedElement = z.infer<typeof SanitizedElementSchema>;
@@ -92,6 +157,7 @@ export const RedactionEntrySchema = z.object({
 });
 
 export type RedactionEntry = z.infer<typeof RedactionEntrySchema>;
+export type RedactionRegion = RedactionEntry;
 
 export const RedactionManifestSchema = z.array(RedactionEntrySchema);
 
@@ -115,17 +181,22 @@ export const ActionTypeSchema = z.enum([
   "type",
   "wait",
   "highlight",
+  "select",
+  "navigate",
 ]);
 
 export type ActionType = z.infer<typeof ActionTypeSchema>;
 
-export const ScrollDirectionSchema = z.enum(["up", "down"]);
+export const ScrollDirectionSchema = z.enum(["up", "down", "left", "right"]);
 
 export type ScrollDirection = z.infer<typeof ScrollDirectionSchema>;
 
 export const ActionTargetSchema = z.object({
   elementId: z.string().optional(),
   bounds: BoundsSchema.optional(),
+  selector: z.string().optional(),
+  text: z.string().optional(),
+  label: z.string().optional(),
 });
 
 export type ActionTarget = z.infer<typeof ActionTargetSchema>;
@@ -139,6 +210,7 @@ export const ServerActionSchema = z.object({
   amount: z.number().optional(),
   reason: z.string(),
   confidence: z.number().min(0).max(1),
+  risk: z.enum(["low", "medium", "high"]).optional(),
 });
 
 export type ServerAction = z.infer<typeof ServerActionSchema>;
@@ -148,6 +220,7 @@ export const ServerPlanSchema = z.object({
   confidence: z.number().min(0).max(1),
   requiresUserConfirmation: z.boolean(),
   actions: z.array(ServerActionSchema),
+  mode: z.string().optional(),
 });
 
 export type ServerPlan = z.infer<typeof ServerPlanSchema>;
@@ -179,6 +252,8 @@ export const TelemetryEntrySchema = z.object({
     "sensitive_regions_detected",
     "actions_blocked",
     "inference_backend",
+    "vision_latency_ms",
+    "execution_latency_ms",
   ]),
   value: z.number(),
   sessionId: z.string().uuid(),
@@ -198,6 +273,36 @@ export const ValidatedActionSchema = z.object({
 });
 
 export type ValidatedAction = z.infer<typeof ValidatedActionSchema>;
+
+export interface ExecutionResult {
+  success: boolean;
+  error?: string;
+  verified: boolean;
+  details?: Record<string, any>;
+  actionId?: string;
+}
+
+export interface VerificationResult {
+  verified: boolean;
+  reason?: string;
+  details?: Record<string, any>;
+}
+
+export interface VisionDetection {
+  bounds: Bounds;
+  confidence: number;
+  className: string;
+  classId?: number;
+  label?: string;
+  type?: string;
+}
+
+export interface SanitizedPageContext {
+  pageMap: PageMap;
+  sanitizedScreenshot?: string;
+  redactionManifest: RedactionManifest;
+  visionDetections?: VisionDetection[];
+}
 
 export function validateClientPayload(data: unknown): ClientPayload {
   return ClientPayloadSchema.parse(data);
@@ -227,3 +332,44 @@ export const MAX_SCREENSHOT_DIMENSION = 1920;
 export const REQUEST_TIMEOUT_MS = 10_000;
 export const RATE_LIMIT_MAX_REQUESTS = 30;
 export const RATE_LIMIT_WINDOW_MS = 60_000;
+
+export type AgentState =
+  | "idle"
+  | "observing"
+  | "interpreting"
+  | "planning"
+  | "validating"
+  | "waiting_for_confirmation"
+  | "needs_clarification"
+  | "ready"
+  | "executing"
+  | "verifying"
+  | "completed"
+  | "blocked"
+  | "failed"
+  | "stopped";
+
+export interface AgentStep {
+  stepNumber: number;
+  action: ServerAction;
+  result: "success" | "failed" | "pending";
+  error?: string;
+  pageChanged: boolean;
+  timestamp: string;
+  verified?: boolean;
+  details?: Record<string, any>;
+}
+
+export interface AgentExecutionContext {
+  goal: string;
+  classification: GoalClassification;
+  plan: ServerPlan;
+  currentStep: number;
+  maxSteps: number;
+  steps: AgentStep[];
+  status: AgentState;
+  lastObservation?: PageMap;
+  sessionId: string;
+  userGoal: string;
+  isExecuting: boolean;
+}

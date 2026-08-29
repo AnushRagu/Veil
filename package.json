@@ -14,9 +14,9 @@
     "build:server": "npm run build --workspace=server",
     "build:shared": "npm run build --workspace=shared",
     "build": "npm run build:shared && npm run build:extension && npm run build:server",
-    "test": "npm run test --workspaces",
+    "test": "vitest run",
     "lint": "npm run lint --workspaces",
-    "demo": "npm run build:extension && npx serve extension/dist",
+    "demo": "npx serve -l 3002 demo",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down"
   },

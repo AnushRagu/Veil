@@ -2,6 +2,7 @@ import {
   Bounds,
   RedactionEntry,
   RedactionManifest,
+  RedactionCategory,
   SanitizedElement,
 } from "@privatesight/shared";
 import {
@@ -92,18 +93,26 @@ export function extractSanitizedElements(
     acceptNode(node) {
       const el = node as Element;
       const style = getComputedStyle(el);
-      if (style.display === "none" || style.visibility === "hidden") {
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
         return NodeFilter.FILTER_REJECT;
       }
       const rect = el.getBoundingClientRect();
       if (rect.width === 0 && rect.height === 0) {
         return NodeFilter.FILTER_REJECT;
       }
-      const role = el.getAttribute("role") || getImplicitRole(el);
-      if (["button", "link", "textbox", "combobox", "checkbox", "radio", "menuitem", "tab", "heading", "img", "searchbox", "slider", "spinbutton", "switch", "option", "listbox", "dialog"].includes(role)) {
+      // Always accept elements with explicit sensitive attributes
+      if (elementHasSensitiveAttribute(el)) {
         return NodeFilter.FILTER_ACCEPT;
       }
-      if (el.tagName.match(/^(A|BUTTON|INPUT|SELECT|TEXTAREA|IMG|H[1-6]|LABEL)$/i)) {
+      // Always accept elements with aria-label or title
+      if (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby") || el.hasAttribute("title")) {
+        return NodeFilter.FILTER_ACCEPT;
+      }
+      const role = el.getAttribute("role") || getImplicitRole(el);
+      if (["button", "link", "textbox", "combobox", "checkbox", "radio", "menuitem", "tab", "heading", "img", "searchbox", "slider", "spinbutton", "switch", "option", "listbox", "dialog", "region", "form"].includes(role)) {
+        return NodeFilter.FILTER_ACCEPT;
+      }
+      if (el.tagName.match(/^(A|BUTTON|INPUT|SELECT|TEXTAREA|IMG|H[1-6]|LABEL|FORM)$/i)) {
         return NodeFilter.FILTER_ACCEPT;
       }
       return NodeFilter.FILTER_SKIP;
@@ -121,10 +130,40 @@ export function extractSanitizedElements(
     const textContent = el.textContent || "";
     const sensitive = classifyElementSensitivity(el, textContent);
 
+    const inputEl = el as HTMLInputElement;
+    const placeholder = inputEl.placeholder || el.getAttribute("placeholder") || "";
+    const valueState = inputEl.value && inputEl.value.length > 0 ? "filled" : inputEl.value !== undefined ? "empty" : "unknown";
+    const href = el.getAttribute("href") || undefined;
+    const tagName = el.tagName.toLowerCase();
+    const type = inputEl.type || el.getAttribute("type") || undefined;
+    
+    // Generate robust selector
+    const selector = generateSelector(el);
+    // Generate XPath
+    const xpath = generateXPath(el);
+    // ARIA attributes
+    const ariaLabel = el.getAttribute("aria-label") || undefined;
+    const ariaLabelledBy = el.getAttribute("aria-labelledby") || undefined;
+    const name = el.getAttribute("name") || undefined;
+    const elementId = el.id || undefined;
+    const formId = (el.closest("form") as HTMLFormElement)?.id || undefined;
+    const autocomplete = el.getAttribute("autocomplete") || undefined;
+    const inputType = (el as HTMLInputElement).type || el.getAttribute("type") || undefined;
+    const required = el.hasAttribute("required");
+    const readOnly = el.hasAttribute("readonly");
+    
+    const category = sensitive ? classifyElementCategoryDirect(el, label, textContent) : undefined;
+    const replacementToken = category ? getReplacementToken(category) : undefined;
+
+    // Sanitize text content and value
+    const sanitizedTextContent = sensitive ? replacementToken || "[REDACTED]" : textContent.slice(0, 200);
+    const sanitizedValue = sensitive ? replacementToken || "[REDACTED]" : (inputEl.value || undefined);
+    const sanitizedLabel = sanitizeLabel(label, sensitive, category);
+
     elements.push({
       id: `el-${index++}-${generateId()}`,
       role,
-      label: sanitizeLabel(label, sensitive),
+      label: sanitizedLabel,
       bounds: {
         x: Math.round(rect.x),
         y: Math.round(rect.y),
@@ -134,6 +173,24 @@ export function extractSanitizedElements(
       visible: isElementVisible(el),
       enabled: isElementEnabled(el),
       sensitive,
+      placeholder: sensitive ? (replacementToken || "[REDACTED]") : (placeholder || undefined),
+      valueState: valueState as SanitizedElement["valueState"],
+      href,
+      tagName,
+      type,
+      selector,
+      xpath,
+      ariaLabel,
+      ariaLabelledBy,
+      name,
+      elementId,
+      formId,
+      autocomplete,
+      inputType,
+      required: required || undefined,
+      readOnly: readOnly || undefined,
+      textContent: sanitizedTextContent,
+      value: sanitizedValue,
     });
   }
 
@@ -187,11 +244,90 @@ function getAccessibleLabel(el: Element): string {
   ).trim();
 }
 
-function sanitizeLabel(label: string, sensitive: boolean): string {
+function sanitizeLabel(label: string, sensitive: boolean, category?: RedactionCategory): string {
   if (!sensitive) return label;
+  if (category) return getReplacementToken(category);
   const pii = detectPIICategory(label);
   if (pii) return getReplacementToken(pii.category);
   return "[REDACTED_LABEL]";
+}
+
+export function classifyElementCategoryDirect(
+  el: Element,
+  label: string,
+  textContent: string
+): RedactionCategory {
+  const inputEl = el instanceof HTMLInputElement ? el : null;
+  const attrText = [
+    label,
+    el.getAttribute("aria-label") || "",
+    el.getAttribute("placeholder") || "",
+    el.getAttribute("name") || "",
+    el.getAttribute("id") || "",
+    el.getAttribute("autocomplete") || "",
+    inputEl?.type || el.getAttribute("type") || "",
+    textContent,
+    getNearbyLabelText(el),
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (attrText.includes("password") || attrText.includes("passwort") || attrText.includes("current-password") || attrText.includes("new-password") || inputEl?.type === "password") {
+    return "password";
+  }
+  if (attrText.includes("otp") || attrText.includes("one-time") || attrText.includes("verification code") || attrText.includes("auth code")) {
+    return "otp";
+  }
+  if (attrText.includes("credit") || attrText.includes("card") || attrText.includes("cc-number") || attrText.includes("cc-exp") || attrText.includes("expiry")) {
+    return "credit_card";
+  }
+  if (attrText.includes("cvv") || attrText.includes("cvc") || attrText.includes("security code") || attrText.includes("cc-csc")) {
+    return "cvv";
+  }
+  if (attrText.includes("aadhaar")) return "aadhaar";
+  if (attrText.includes("pan")) return "pan";
+  if (attrText.includes("ssn") || attrText.includes("social security")) return "account_number";
+  if (attrText.includes("account") || attrText.includes("routing") || attrText.includes("iban")) return "account_number";
+  if (attrText.includes("email") || inputEl?.type === "email") return "email";
+  if (attrText.includes("phone") || attrText.includes("tel") || attrText.includes("mobile") || inputEl?.type === "tel") return "phone";
+  if (attrText.includes("address") || attrText.includes("street") || attrText.includes("zip") || attrText.includes("postal")) return "address";
+  if (attrText.includes("photo") || attrText.includes("profile") || attrText.includes("avatar") || attrText.includes("face")) return "face";
+
+  const pii = detectPIICategory(textContent) || detectPIICategory(label) || (inputEl?.value ? detectPIICategory(inputEl.value) : null);
+  if (pii) return pii.category as RedactionCategory;
+
+  return "explicit_sensitive";
+}
+
+function classifyElementCategory(el: SanitizedElement): RedactionEntry["category"] {
+  const label = [
+    el.label ?? "",
+    el.name ?? "",
+    el.elementId ?? "",
+    el.placeholder ?? "",
+    el.autocomplete ?? "",
+    el.inputType ?? "",
+    el.textContent ?? "",
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  if (label.includes("password") || label.includes("passwort") || label.includes("current-password") || el.inputType === "password") return "password" as const;
+  if (label.includes("otp") || label.includes("one-time") || label.includes("verification")) return "otp" as const;
+  if (label.includes("credit") || label.includes("card") || label.includes("cc-number") || label.includes("expiry")) return "credit_card" as const;
+  if (label.includes("cvv") || label.includes("cvc") || label.includes("cc-csc")) return "cvv" as const;
+  if (label.includes("aadhaar")) return "aadhaar" as const;
+  if (label.includes("pan")) return "pan" as const;
+  if (label.includes("ssn") || label.includes("social security") || label.includes("account") || label.includes("routing") || label.includes("iban")) return "account_number" as const;
+  if (label.includes("email") || el.inputType === "email") return "email" as const;
+  if (label.includes("phone") || label.includes("tel") || label.includes("mobile") || el.inputType === "tel") return "phone" as const;
+  if (label.includes("address") || label.includes("street") || label.includes("zip") || label.includes("postal")) return "address" as const;
+  if (label.includes("photo") || label.includes("avatar") || label.includes("face") || label.includes("profile")) return "face" as const;
+
+  const pii = detectPIICategory(el.textContent ?? "") || detectPIICategory(el.label ?? "") || detectPIICategory(el.value ?? "");
+  if (pii) return pii.category as RedactionEntry["category"];
+
+  return "explicit_sensitive" as const;
 }
 
 function isElementVisible(el: Element): boolean {
@@ -218,6 +354,15 @@ function hasValidBounds(bounds: Bounds | undefined): bounds is Bounds {
     typeof bounds.height === "number";
 }
 
+function calculateConfidence(el: SanitizedElement, category: string): number {
+  let confidence = 0.6;
+  const label = (el.label ?? "").toLowerCase();
+  if (EXPLICIT_SENSITIVE_ATTRS.some((attr) => label.includes(attr))) confidence += 0.35;
+  if (["password", "credit_card", "cvv", "aadhaar", "pan", "otp", "email", "phone"].includes(category)) confidence += 0.3;
+  if (label.includes(category.replace("_", " "))) confidence += 0.2;
+  return Math.min(confidence, 1.0);
+}
+
 export function createRedactionManifest(
   elements: SanitizedElement[],
   _screenshotWidth: number,
@@ -241,30 +386,6 @@ export function createRedactionManifest(
   }
 
   return manifest;
-}
-
-function classifyElementCategory(el: SanitizedElement): RedactionEntry["category"] {
-  const label = (el.label ?? "").toLowerCase();
-  if (label.includes("password") || label.includes("passwort")) return "password" as const;
-  if (label.includes("otp") || label.includes("one-time") || label.includes("verification")) return "otp" as const;
-  if (label.includes("credit") || label.includes("card")) return "credit_card" as const;
-  if (label.includes("cvv") || label.includes("cvc")) return "cvv" as const;
-  if (label.includes("aadhaar")) return "aadhaar" as const;
-  if (label.includes("pan")) return "pan" as const;
-  if (label.includes("account") || label.includes("routing") || label.includes("iban")) return "account_number" as const;
-  if (label.includes("email") || label.includes("e-mail")) return "email" as const;
-  if (label.includes("phone") || label.includes("tel") || label.includes("mobile")) return "phone" as const;
-  if (label.includes("address") || label.includes("street") || label.includes("zip") || label.includes("postal")) return "address" as const;
-  return "explicit_sensitive" as const;
-}
-
-function calculateConfidence(el: SanitizedElement, category: string): number {
-  let confidence = 0.5;
-  const label = (el.label ?? "").toLowerCase();
-  if (EXPLICIT_SENSITIVE_ATTRS.some((attr) => label.includes(attr))) confidence += 0.4;
-  if (["password", "credit_card", "cvv", "aadhaar", "pan"].includes(category)) confidence += 0.3;
-  if (label.includes(category.replace("_", " "))) confidence += 0.2;
-  return Math.min(confidence, 1.0);
 }
 
 export function applyRedactionToScreenshot(
@@ -363,4 +484,57 @@ export function processRedaction(context: RedactionContext): RedactionResult {
   }
 
   return { redactedElements, manifest, redactedText };
+}
+
+function generateSelector(el: Element): string {
+  if (el.id) return `#${el.id}`;
+  const parts: string[] = [];
+  let current: Element | null = el;
+  while (current && current !== document.body) {
+    let part = current.tagName.toLowerCase();
+    if (current.id) {
+      part += `#${current.id}`;
+      parts.unshift(part);
+      break;
+    }
+    const classNames = Array.from(current.classList).filter(c => !c.startsWith("data-") && !c.startsWith("ps-")).join(".");
+    if (classNames) part += `.${classNames}`;
+    const parent = current.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1;
+        part += `:nth-of-type(${index})`;
+      }
+    }
+    parts.unshift(part);
+    current = parent;
+  }
+  return parts.join(" > ");
+}
+
+function generateXPath(el: Element): string {
+  if (el.id) return `//*[@id="${el.id}"]`;
+  const parts: string[] = [];
+  let current: Element | null = el;
+  while (current && current !== document.body) {
+    let part = current.tagName.toLowerCase();
+    const parent = current.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children).filter(c => c.tagName === current.tagName);
+      if (siblings.length > 1) {
+        const index = siblings.indexOf(current) + 1;
+        part += `[${index}]`;
+      }
+    }
+    parts.unshift(part);
+    current = parent;
+  }
+  return "/" + parts.join("/");
+}
+
+function sanitizeTextContent(text: string, sensitive: boolean): string {
+  if (!sensitive) return text.slice(0, 200);
+  const { redacted } = redactTextContent(text);
+  return redacted.slice(0, 200);
 }
