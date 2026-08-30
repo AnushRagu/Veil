@@ -40,6 +40,7 @@ interface PageStateTracker {
 }
 
 interface AgentExecutionState {
+  taskId?: string;
   sessionId: string | null;
   userGoal: string;
   classification: GoalClassification | null;
@@ -52,16 +53,20 @@ interface AgentExecutionState {
   pageTracker: PageStateTracker | null;
   isExecuting: boolean;
   visionBackend: "webgpu" | "wasm" | "mock";
+  error?: string | null;
+  serverConnected?: boolean;
 }
 
 const state = {
   serverConfig: { url: "http://localhost:3001", enabled: true } as ServerConfig,
+  serverConnected: true,
   rateLimits: new Map<string, RateLimitEntry>(),
   pendingRequests: new Map<string, AbortController>(),
   activeTabId: -1,
   offscreenReady: false,
   offscreenCreating: null as Promise<void> | null,
   agentExecution: {
+    taskId: undefined,
     sessionId: null,
     userGoal: "",
     classification: null,
@@ -74,6 +79,7 @@ const state = {
     pageTracker: null,
     isExecuting: false,
     visionBackend: "mock",
+    error: null,
   } as AgentExecutionState,
 };
 
@@ -659,6 +665,222 @@ function handleEmergencyStop(): void {
   }
 }
 
+async function checkServerHealth(): Promise<boolean> {
+  if (!state.serverConfig.enabled) return false;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1500);
+    const res = await fetch(`${state.serverConfig.url}/api/health`, {
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function buildLocalPlan(userGoal: string, pageMap: PageMap): ServerPlan {
+  const goalLower = userGoal.trim().toLowerCase();
+  const classification = classifyGoal(userGoal, pageMap);
+
+  // 1. Scroll Actions
+  if (classification.mode === "scroll" || goalLower.includes("scroll")) {
+    let direction: "up" | "down" = "down";
+    let amount = 400;
+    if (goalLower.includes("up") || goalLower.includes("top")) direction = "up";
+    if (goalLower.includes("top") || goalLower.includes("bottom")) amount = 2000;
+
+    return {
+      summary: `Scroll page ${direction}`,
+      confidence: 0.95,
+      requiresUserConfirmation: false,
+      actions: [
+        {
+          id: `act-local-scroll-${Date.now()}`,
+          type: "scroll",
+          direction,
+          amount,
+          reason: `Scroll ${direction} to navigate content`,
+          confidence: 0.95,
+          risk: "low",
+        },
+      ],
+    };
+  }
+
+  // 2. Destructive Actions
+  if (
+    classification.riskLevel === "high" ||
+    goalLower.includes("delete") ||
+    goalLower.includes("remove") ||
+    goalLower.includes("erase")
+  ) {
+    const targetElement = pageMap.elements.find(
+      (el) =>
+        el.visible &&
+        el.enabled &&
+        (el.label.toLowerCase().includes("delete") ||
+          el.label.toLowerCase().includes("remove") ||
+          el.id.toLowerCase().includes("delete"))
+    );
+
+    return {
+      summary: `Delete action requested (${targetElement?.label || "account data"})`,
+      confidence: 0.9,
+      requiresUserConfirmation: true,
+      actions: targetElement
+        ? [
+            {
+              id: `act-local-delete-${Date.now()}`,
+              type: "click",
+              target: {
+                elementId: targetElement.id,
+                selector: targetElement.selector,
+                label: targetElement.label,
+                bounds: targetElement.bounds,
+              },
+              reason: "Destructive deletion operation",
+              confidence: 0.9,
+              risk: "high",
+            },
+          ]
+        : [],
+    };
+  }
+
+  // 3. Search action
+  if (classification.mode === "search" || goalLower.startsWith("search")) {
+    const searchElement = pageMap.elements.find(
+      (el) =>
+        el.visible &&
+        el.enabled &&
+        !el.sensitive &&
+        (el.role === "searchbox" ||
+          el.type === "search" ||
+          el.placeholder?.toLowerCase().includes("search") ||
+          el.label.toLowerCase().includes("search") ||
+          el.name?.toLowerCase().includes("search") ||
+          el.id.toLowerCase().includes("search"))
+    );
+
+    if (searchElement) {
+      return {
+        summary: `Focus search box on page`,
+        confidence: 0.95,
+        requiresUserConfirmation: false,
+        actions: [
+          {
+            id: `act-local-search-${Date.now()}`,
+            type: "focus",
+            target: {
+              elementId: searchElement.id,
+              selector: searchElement.selector,
+              label: searchElement.label || "Search",
+              bounds: searchElement.bounds,
+            },
+            reason: "Focus search field for user input",
+            confidence: 0.95,
+            risk: "low",
+          },
+        ],
+      };
+    }
+  }
+
+  // 4. Click / Find / Focus action matching keywords
+  const nonStopKeywords = goalLower
+    .replace(/^(click|find|highlight|focus|press|tap|go to|open)\s+(the\s+|on\s+|a\s+|an\s+)?/i, "")
+    .split(/\s+/)
+    .filter((w) => w.length > 1 && !["the", "a", "an", "button", "link", "input", "page"].includes(w));
+
+  const candidates = pageMap.elements
+    .filter((el) => el.visible && el.enabled && !el.sensitive)
+    .map((el) => {
+      let score = 0;
+      const labelLower = el.label.toLowerCase();
+      const textLower = el.textContent?.toLowerCase() || "";
+      const hrefLower = el.href?.toLowerCase() || "";
+      const ariaLower = el.ariaLabel?.toLowerCase() || "";
+      const nameLower = el.name?.toLowerCase() || "";
+
+      for (const kw of nonStopKeywords) {
+        if (labelLower === kw) score += 100;
+        else if (labelLower.includes(kw)) score += 50;
+        if (hrefLower.includes(kw)) score += 60;
+        if (textLower.includes(kw)) score += 30;
+        if (ariaLower.includes(kw)) score += 40;
+        if (nameLower.includes(kw)) score += 40;
+      }
+      return { element: el, score };
+    })
+    .filter((c) => c.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const matched = candidates[0]?.element;
+  const isFindOnly =
+    goalLower.startsWith("find") ||
+    goalLower.startsWith("highlight") ||
+    goalLower.startsWith("locate");
+  const actionType: ActionType = isFindOnly ? "highlight" : "click";
+
+  if (matched) {
+    return {
+      summary: `${isFindOnly ? "Locate" : "Click"} "${matched.label || "element"}" on page`,
+      confidence: 0.9,
+      requiresUserConfirmation: false,
+      actions: [
+        {
+          id: `act-local-${Date.now()}`,
+          type: actionType,
+          target: {
+            elementId: matched.id,
+            selector: matched.selector,
+            label: matched.label,
+            bounds: matched.bounds,
+          },
+          reason: `${isFindOnly ? "Locate and highlight" : "Click"} ${matched.label}`,
+          confidence: 0.9,
+          risk: "low",
+        },
+      ],
+    };
+  }
+
+  // Informational or clarification
+  if (classification.mode === "information" || classification.mode === "informational") {
+    return {
+      summary: `I can inspect this page, protect private information, and perform browser actions you request.`,
+      confidence: 0.95,
+      requiresUserConfirmation: false,
+      actions: [],
+      mode: "informational",
+    };
+  }
+
+  return {
+    summary: `Could not find an element matching "${userGoal}" on this page`,
+    confidence: 0.2,
+    requiresUserConfirmation: false,
+    actions: [],
+  };
+}
+
+async function planActionLocallyOrServer(payload: ClientPayload): Promise<ServerPlan> {
+  const isHealthy = await checkServerHealth();
+  if (isHealthy) {
+    try {
+      const plan = await sendToServer(payload);
+      if (plan) return plan;
+    } catch (err) {
+      console.warn("[VEIL][BACKGROUND] Server plan failed, falling back to local planner:", err);
+    }
+  }
+
+  console.log("[VEIL][BACKGROUND] Using local rule-based perception planner for goal:", payload.userGoal);
+  return buildLocalPlan(payload.userGoal, payload.pageMap);
+}
+
 /* ------------------------------------------------------------------ *
  * Message router                                                      *
  * ------------------------------------------------------------------ */
@@ -673,99 +895,112 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     try {
       switch (message.type) {
         case "ANALYZE_AND_PLAN": {
-          console.log(`[VEIL][BACKGROUND] received ANALYZE: "${message.userGoal || ""}"`);
+          const taskId = `task-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          console.log(`[VEIL][BACKGROUND] [${taskId}] received ANALYZE: "${message.userGoal || ""}"`);
+
+          // Completely reset previous task execution state
+          state.agentExecution = {
+            taskId,
+            sessionId: null,
+            userGoal: message.userGoal || "",
+            classification: null,
+            plan: null,
+            currentStep: 0,
+            maxSteps: 10,
+            steps: [],
+            status: "observing",
+            lastPageMap: null,
+            pageTracker: null,
+            isExecuting: true,
+            visionBackend: "mock",
+            error: null,
+          };
+
           const activeTab = await getActiveTab();
           if (!activeTab || !activeTab.id) {
-            console.error("[VEIL][BACKGROUND] No active tab found");
-            sendResponse({ success: false, error: "No active tab found. Please open a web page." });
+            const err = "No active tab found. Please open a web page.";
+            state.agentExecution.status = "failed";
+            state.agentExecution.error = err;
+            state.agentExecution.isExecuting = false;
+            sendResponse({ success: false, error: err, agentExecution: state.agentExecution });
             break;
           }
-          console.log(`[VEIL][BACKGROUND] active tab = ${activeTab.id} (${activeTab.url || "unknown URL"})`);
-          state.activeTabId = activeTab.id;
 
+          state.activeTabId = activeTab.id;
           const scriptReady = await ensureContentScript(activeTab.id);
           if (!scriptReady) {
-            sendResponse({ success: false, error: "Could not initialize content perception on active tab." });
+            const err = "Could not connect to page. Refresh the tab and try again.";
+            state.agentExecution.status = "failed";
+            state.agentExecution.error = err;
+            state.agentExecution.isExecuting = false;
+            sendResponse({ success: false, error: err, agentExecution: state.agentExecution });
             break;
           }
 
-          console.log(`[VEIL][BACKGROUND] sending OBSERVE to content (tab ${activeTab.id})`);
+          state.agentExecution.status = "observing";
           const captureResponse = await sendTabMessage(activeTab.id, {
             type: "CAPTURE_AND_SEND",
             userGoal: message.userGoal || "",
           });
 
           if (!captureResponse.success || !captureResponse.payload) {
-            console.error(`[VEIL][BACKGROUND] Capture failed: ${captureResponse.error}`);
-            sendResponse({ success: false, error: captureResponse.error || "Page observation failed" });
+            const err = captureResponse.error || "Page observation failed";
+            state.agentExecution.status = "failed";
+            state.agentExecution.error = err;
+            state.agentExecution.isExecuting = false;
+            sendResponse({ success: false, error: err, agentExecution: state.agentExecution });
             break;
           }
 
           const payload: ClientPayload = captureResponse.payload;
-          console.log(`[VEIL][BACKGROUND] received sanitized context: ${payload.redactionManifest?.length ?? 0} redacted items (${payload.pageMap?.elements?.length ?? 0} elements)`);
+          state.agentExecution.sessionId = payload.sessionId;
+          state.agentExecution.lastPageMap = payload.pageMap;
+          state.agentExecution.status = "planning";
 
-          console.log(`[VEIL][BACKGROUND] sending plan request to server (${state.serverConfig.url}/api/agent/plan)`);
-          const plan = await sendToServer(payload);
-          if (!plan) {
-            console.error("[VEIL][BACKGROUND] Server failed to return a plan");
-            sendResponse({ success: false, error: "Server failed to return an action plan" });
-            break;
-          }
-
-          console.log(`[VEIL][BACKGROUND] received plan from server: "${plan.summary}" (${plan.actions?.length ?? 0} actions)`);
+          const plan = await planActionLocallyOrServer(payload);
           const validated = validatePlan(plan, payload.pageMap.elements ?? [], payload.pageMap.urlOrigin);
           const classification = classifyGoal(payload.userGoal, payload.pageMap);
 
+          state.agentExecution.plan = plan;
+          state.agentExecution.classification = classification;
+
           const hasAutoActions = validated.some((v) => v.policy === "auto");
           const isInformational = classification.mode === "information" || classification.mode === "informational";
-          const shouldAutoExecute = hasAutoActions && (plan?.actions?.length ?? 0) > 0 && !isInformational && classification.riskLevel !== "high" && !plan.requiresUserConfirmation;
+          const shouldAutoExecute =
+            hasAutoActions &&
+            (plan?.actions?.length ?? 0) > 0 &&
+            !isInformational &&
+            classification.riskLevel !== "high" &&
+            !plan.requiresUserConfirmation;
 
           let executionResult: any = { success: true };
           if (shouldAutoExecute) {
-            console.log(`[VEIL][BACKGROUND] auto-executing plan with ${plan.actions.length} action(s)`);
-            executionResult = await startAgentExecution(payload, plan, classification, payload.pageMap.elements ?? []);
-          } else if (plan.requiresUserConfirmation || classification.riskLevel === "high") {
-            console.log(`[VEIL][BACKGROUND] plan requires user confirmation (risk: ${classification.riskLevel})`);
-            state.agentExecution = {
-              sessionId: payload.sessionId,
-              userGoal: payload.userGoal,
-              classification,
+            state.agentExecution.status = "executing";
+            executionResult = await startAgentExecution(
+              payload,
               plan,
-              currentStep: 0,
-              maxSteps: 10,
-              steps: [],
-              status: "waiting_for_confirmation",
-              lastPageMap: payload.pageMap,
-              pageTracker: {
-                tabId: activeTab.id,
-                urlOrigin: payload.pageMap.urlOrigin,
-                title: payload.pageMap.title,
-                observedAt: Date.now(),
-                elementCount: payload.pageMap.elements.length,
-              },
-              isExecuting: false,
-              visionBackend: "mock",
+              classification,
+              payload.pageMap.elements ?? []
+            );
+          } else if (plan.requiresUserConfirmation || classification.riskLevel === "high") {
+            state.agentExecution.status = "waiting_for_confirmation";
+            state.agentExecution.isExecuting = false;
+            state.agentExecution.pageTracker = {
+              tabId: activeTab.id,
+              urlOrigin: payload.pageMap.urlOrigin,
+              title: payload.pageMap.title,
+              observedAt: Date.now(),
+              elementCount: payload.pageMap.elements.length,
             };
           } else {
-            state.agentExecution = {
-              sessionId: payload.sessionId,
-              userGoal: payload.userGoal,
-              classification,
-              plan,
-              currentStep: 0,
-              maxSteps: 10,
-              steps: [],
-              status: isInformational ? "completed" : "ready",
-              lastPageMap: payload.pageMap,
-              pageTracker: {
-                tabId: activeTab.id,
-                urlOrigin: payload.pageMap.urlOrigin,
-                title: payload.pageMap.title,
-                observedAt: Date.now(),
-                elementCount: payload.pageMap.elements.length,
-              },
-              isExecuting: false,
-              visionBackend: "mock",
+            state.agentExecution.status = isInformational ? "completed" : "ready";
+            state.agentExecution.isExecuting = false;
+            state.agentExecution.pageTracker = {
+              tabId: activeTab.id,
+              urlOrigin: payload.pageMap.urlOrigin,
+              title: payload.pageMap.title,
+              observedAt: Date.now(),
+              elementCount: payload.pageMap.elements.length,
             };
           }
 
@@ -865,10 +1100,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
 
         case "GET_PRIVACY_STATUS": {
+          const isServerHealthy = await checkServerHealth();
+          state.serverConnected = isServerHealthy;
+
           const activeTab = await getActiveTab();
           if (!activeTab || !activeTab.id) {
             sendResponse({
               success: true,
+              serverConnected: isServerHealthy,
               status: {
                 backend: "mock" as const,
                 redactedCount: 0,
@@ -882,10 +1121,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           await ensureContentScript(activeTab.id);
           const contentRes = await sendTabMessage(activeTab.id, { type: "GET_PRIVACY_STATUS" });
           if (contentRes.success && contentRes.status) {
-            sendResponse({ success: true, status: contentRes.status });
+            sendResponse({
+              success: true,
+              serverConnected: isServerHealthy,
+              status: contentRes.status,
+              redactionManifest: contentRes.redactionManifest,
+            });
           } else {
             sendResponse({
               success: true,
+              serverConnected: isServerHealthy,
               status: {
                 backend: "mock" as const,
                 redactedCount: 0,
@@ -898,9 +1143,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
 
         case "GET_PAGE_SUGGESTIONS": {
+          const isServerHealthy = await checkServerHealth();
+          state.serverConnected = isServerHealthy;
+
           const activeTab = await getActiveTab();
           if (!activeTab || !activeTab.id) {
-            sendResponse({ success: true, suggestions: generatePageSuggestions(null) });
+            sendResponse({
+              success: true,
+              serverConnected: isServerHealthy,
+              suggestions: generatePageSuggestions(null),
+            });
             break;
           }
           state.activeTabId = activeTab.id;
@@ -909,22 +1161,57 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           if (contentRes.success && contentRes.suggestions) {
             sendResponse({
               success: true,
+              serverConnected: isServerHealthy,
               suggestions: contentRes.suggestions,
               pageMap: contentRes.pageMap,
               redactionCount: contentRes.redactionCount,
+              redactionManifest: contentRes.redactionManifest,
             });
           } else {
-            sendResponse({ success: true, suggestions: generatePageSuggestions(null) });
+            sendResponse({
+              success: true,
+              serverConnected: isServerHealthy,
+              suggestions: generatePageSuggestions(null),
+            });
           }
           break;
         }
 
         case "EXECUTE_QUICK_ACTION": {
           const action = message.action as ServerAction;
-          console.log(`[VEIL][BACKGROUND] executing quick action: ${action.type} (${action.reason || ""})`);
+          const taskId = `task-quick-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+          console.log(`[VEIL][BACKGROUND] [${taskId}] executing quick action: ${action.type} (${action.reason || ""})`);
+
+          // Reset previous state
+          state.agentExecution = {
+            taskId,
+            sessionId: `sess-${Date.now()}`,
+            userGoal: action.reason || action.type,
+            classification: {
+              mode: action.type === "highlight" ? "highlight" : action.type === "scroll" ? "scroll" : "click",
+              confidence: 0.95,
+              interpretation: action.reason || `Quick action: ${action.type}`,
+              requiresClarification: false,
+              riskLevel: "low",
+            },
+            plan: null,
+            currentStep: 0,
+            maxSteps: 1,
+            steps: [],
+            status: "executing",
+            lastPageMap: message.pageMap || null,
+            pageTracker: null,
+            isExecuting: true,
+            visionBackend: "mock",
+            error: null,
+          };
+
           const activeTab = await getActiveTab();
           if (!activeTab || !activeTab.id) {
-            sendResponse({ success: false, error: "No active tab found" });
+            state.agentExecution.status = "failed";
+            state.agentExecution.error = "No active tab found";
+            state.agentExecution.isExecuting = false;
+            sendResponse({ success: false, error: "No active tab found", agentExecution: state.agentExecution });
             break;
           }
           state.activeTabId = activeTab.id;
@@ -944,7 +1231,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             action,
             result: isSuccess ? "success" : "failed",
             error: stepResult?.error,
-            pageChanged: Boolean(stepResult?.details?.moved || stepResult?.details?.domChanged || stepResult?.details?.urlChanged),
+            pageChanged: Boolean(
+              stepResult?.details?.moved || stepResult?.details?.domChanged || stepResult?.details?.urlChanged
+            ),
             timestamp: new Date().toISOString(),
             verified: isVerified,
             details: stepResult?.details,
@@ -957,18 +1246,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             confidence: 0.95,
           };
 
-          const quickClassification: GoalClassification = {
-            mode: action.type === "highlight" ? "highlight" : action.type === "scroll" ? "scroll" : "click",
-            confidence: 0.95,
-            interpretation: action.reason || `Execute quick action: ${action.type}`,
-            requiresClarification: false,
-            riskLevel: "low",
-          };
-
           state.agentExecution = {
+            taskId,
             sessionId: `sess-quick-${Date.now()}`,
             userGoal: action.reason || action.type,
-            classification: quickClassification,
+            classification: {
+              mode: action.type === "highlight" ? "highlight" : action.type === "scroll" ? "scroll" : "click",
+              confidence: 0.95,
+              interpretation: action.reason || `Quick action: ${action.type}`,
+              requiresClarification: false,
+              riskLevel: "low",
+            },
             plan: quickPlan,
             currentStep: 1,
             maxSteps: 1,
@@ -984,6 +1272,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             },
             isExecuting: false,
             visionBackend: "mock",
+            error: isSuccess ? null : stepResult?.error || "Action execution failed",
           };
 
           sendResponse({

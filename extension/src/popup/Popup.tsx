@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   PrivacyStatus,
   ClientPayload,
@@ -10,6 +10,8 @@ import {
   AgentStep,
   AgentExecutionContext,
   PageSuggestion,
+  RedactionManifest,
+  summarizeRedactionManifest,
 } from "@privatesight/shared";
 import {
   ShieldIcon,
@@ -34,7 +36,7 @@ const policyMeta: Record<
   { label: string; tone: StatusTone }
 > = {
   auto: { label: "Auto", tone: "ok" },
-  confirm: { label: "Confirm", tone: "warn" },
+  confirm: { label: "Approval required", tone: "warn" },
   reject: { label: "Blocked", tone: "danger" },
 };
 
@@ -47,8 +49,16 @@ const agentStateMeta: Record<
   interpreting: { label: "Understanding goal…", tone: "warn", icon: <MessageSquareIcon size={12} /> },
   planning: { label: "Planning actions…", tone: "warn", icon: <SparkleIcon size={12} strokeWidth={2} /> },
   validating: { label: "Validating safety…", tone: "warn", icon: <ShieldIcon size={12} /> },
-  waiting_for_confirmation: { label: "Confirmation required", tone: "warn", icon: <AlertIcon size={12} strokeWidth={2} /> },
-  needs_clarification: { label: "Needs clarification", tone: "warn", icon: <AlertIcon size={12} strokeWidth={2} /> },
+  waiting_for_confirmation: {
+    label: "Confirmation required",
+    tone: "warn",
+    icon: <AlertIcon size={12} strokeWidth={2} />,
+  },
+  needs_clarification: {
+    label: "Needs clarification",
+    tone: "warn",
+    icon: <AlertIcon size={12} strokeWidth={2} />,
+  },
   ready: { label: "Ready to execute", tone: "ok", icon: <PlayIcon size={12} /> },
   executing: { label: "Executing…", tone: "warn", icon: <PlayIcon size={12} /> },
   verifying: { label: "Verifying result…", tone: "warn", icon: <RefreshCwIcon size={12} /> },
@@ -66,7 +76,7 @@ const ServerActionItem: React.FC<{
   isExecuting?: boolean;
   stepNumber?: number;
   step?: AgentStep;
-}> = ({ action, index, onConfirm, onReject, isExecuting, stepNumber, step }) => {
+}> = ({ action, index, isExecuting, stepNumber, step }) => {
   const policyInfo = policyMeta[action.policy];
   const { action: act, reason } = action;
   const isCurrentStep = stepNumber === index + 1;
@@ -93,7 +103,7 @@ const ServerActionItem: React.FC<{
     } else if (step.result === "pending") {
       statusBadge = (
         <span className="status-pill status-pill--warn">
-          Running…
+          Executing…
         </span>
       );
     }
@@ -126,65 +136,85 @@ const HighRiskConfirmationCard: React.FC<{
   pendingAction?: ValidatedAction;
   onConfirm: () => void;
   onCancel: () => void;
-  isExecuting?: boolean;
+  isExecuting: boolean;
 }> = ({ plan, pendingAction, onConfirm, onCancel, isExecuting }) => {
-  const action = pendingAction?.action;
-  const mappedElement = pendingAction?.mappedElement;
-  const targetDesc = mappedElement?.label || action?.target?.label || action?.target?.elementId || "Target Element";
-  const actionType = action?.type ? action.type.toUpperCase() : "ACTION";
+  const targetLabel =
+    pendingAction?.mappedElement?.label ||
+    pendingAction?.action.target?.label ||
+    pendingAction?.action.target?.elementId ||
+    "Submit";
+
+  const isDestructive =
+    pendingAction?.action.risk === "high" ||
+    plan.summary.toLowerCase().includes("delete") ||
+    targetLabel.toLowerCase().includes("delete") ||
+    targetLabel.toLowerCase().includes("erase");
+
+  const isSubmit =
+    targetLabel.toLowerCase().includes("submit") ||
+    targetLabel.toLowerCase().includes("send") ||
+    plan.summary.toLowerCase().includes("submit");
+
+  const buttonLabel = isDestructive
+    ? "Confirm & Delete"
+    : isSubmit
+    ? "Confirm & Submit"
+    : "Confirm & Execute";
 
   return (
     <div className="confirmation-card">
       <div className="confirmation-card__header">
-        <div className="confirmation-card__badge">
-          <AlertIcon size={12} strokeWidth={2.4} />
-          <span>HIGH RISK</span>
+        <div className="confirmation-card__title">
+          <AlertIcon size={14} strokeWidth={2.4} />
+          <span>{isDestructive ? "⚠️ High-risk confirmation" : "⚡ Confirm action"}</span>
         </div>
-        <span className="confirmation-card__title">⚠️ Confirmation required</span>
+        <span className={`badge ${isDestructive ? "badge--danger" : "badge--warn"}`}>
+          {isDestructive ? "Destructive" : "Authorization required"}
+        </span>
       </div>
 
-      <div className="confirmation-card__body">
-        <div className="confirmation-card__intent">
-          <strong>Veil wants to:</strong>
-          <div className="confirmation-card__action-text">
-            {actionType} &ldquo;{targetDesc}&rdquo;
-          </div>
-        </div>
-
-        <p className="confirmation-card__warning">
-          This action may be destructive and cannot be automatically executed.
-        </p>
-
-        {pendingAction?.reason && (
-          <div className="confirmation-card__reason">
-            <strong>Reason:</strong> {pendingAction.reason}
-          </div>
+      <p className="confirmation-card__body">
+        {isDestructive ? (
+          <>
+            Veil will click <strong>&ldquo;{targetLabel}&rdquo;</strong> on this page. This action may modify or delete account data and cannot be undone.
+          </>
+        ) : isSubmit ? (
+          <>
+            Veil will click <strong>&ldquo;{targetLabel}&rdquo;</strong> to submit the form on this page. Sensitive values remain protected on-device.
+          </>
+        ) : (
+          <>
+            Veil will click <strong>&ldquo;{targetLabel}&rdquo;</strong> on this page upon your confirmation.
+          </>
         )}
-      </div>
+      </p>
 
       <div className="confirmation-card__actions">
         <button
+          type="button"
           onClick={onCancel}
           disabled={isExecuting}
-          className="btn btn--secondary btn--md"
-          style={{ flex: 1 }}
+          className="btn btn--secondary"
         >
           Cancel
         </button>
         <button
+          type="button"
           onClick={onConfirm}
           disabled={isExecuting}
-          className="btn btn--danger btn--md"
-          style={{
-            flex: 1.5,
-            background: "#dc2626",
-            color: "#ffffff",
-            borderColor: "#b91c1c",
-            fontWeight: 600,
-          }}
+          className={`btn ${isDestructive ? "btn--danger" : "btn--primary"}`}
         >
-          <CheckIcon size={14} strokeWidth={2.4} />
-          {isExecuting ? "Executing…" : "Confirm & Execute"}
+          {isExecuting ? (
+            <>
+              <span className="spinner" />
+              <span>Executing…</span>
+            </>
+          ) : (
+            <>
+              <CheckIcon size={12} strokeWidth={2} />
+              <span>{buttonLabel}</span>
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -194,41 +224,36 @@ const HighRiskConfirmationCard: React.FC<{
 const AgentStateIndicator: React.FC<{
   status: AgentState;
   classification?: GoalClassification;
-  currentStep?: number;
-  totalSteps?: number;
-}> = ({ status, classification, currentStep, totalSteps }) => {
+  currentStep: number;
+  totalSteps: number;
+  error?: string | null;
+}> = ({ status, classification, currentStep, totalSteps, error }) => {
   const meta = agentStateMeta[status] || agentStateMeta.idle;
 
   return (
-    <div className="task-tracker">
-      <div className="task-tracker__header">
-        <div className="task-tracker__status">
+    <div className={`agent-indicator agent-indicator--${meta.tone}`}>
+      <div className="agent-indicator__header">
+        <div className="agent-indicator__status">
           <span className={`status-dot status-dot--${meta.tone}`} />
-          <span className="task-tracker__label">{meta.label}</span>
+          <span className="agent-indicator__label">{meta.label}</span>
         </div>
-        {totalSteps && totalSteps > 0 ? (
-          <span className="task-tracker__steps">
-            Step {currentStep} of {totalSteps}
+        {totalSteps > 0 && (
+          <span className="agent-indicator__steps">
+            Step {Math.min(currentStep + 1, totalSteps)} of {totalSteps}
           </span>
-        ) : null}
+        )}
       </div>
 
-      {classification && classification.interpretation && (
-        <div className="task-tracker__interpretation">
+      {classification?.interpretation && status !== "failed" && (
+        <div className="agent-indicator__detail">
           <strong>Goal:</strong> {classification.interpretation}
         </div>
       )}
 
-      {classification?.requiresClarification && classification.clarificationQuestion && (
-        <div className="alert alert--warn" style={{ marginTop: "6px" }}>
+      {status === "failed" && error && (
+        <div className="agent-indicator__error">
           <AlertIcon size={12} strokeWidth={2} />
-          <span>{classification.clarificationQuestion}</span>
-        </div>
-      )}
-
-      {classification?.mode === "informational" && (
-        <div className="task-tracker__info">
-          I can inspect this page, identify elements, protect sensitive data, and perform browser actions you request (e.g., &ldquo;click submit&rdquo;, &ldquo;fill name&rdquo;, &ldquo;scroll down&rdquo;).
+          <span>{error}</span>
         </div>
       )}
     </div>
@@ -245,12 +270,14 @@ export const Popup: React.FC = () => {
 
   const [privacyStatus, setPrivacyStatus] = useState<PrivacyStatus | null>(null);
   const [lastPayload, setLastPayload] = useState<ClientPayload | null>(null);
+  const [redactionManifest, setRedactionManifest] = useState<RedactionManifest>([]);
   const [serverPlan, setServerPlan] = useState<ServerPlan | null>(null);
   const [validatedActions, setValidatedActions] = useState<ValidatedAction[]>([]);
   const [agentExecution, setAgentExecution] = useState<AgentExecutionContext | null>(null);
   const [suggestions, setSuggestions] = useState<PageSuggestion[]>([]);
   const [quickFeedback, setQuickFeedback] = useState<string | null>(null);
   const [privacyExpanded, setPrivacyExpanded] = useState<boolean>(false);
+  const [redactionExpanded, setRedactionExpanded] = useState<boolean>(false);
   const [pollingInterval, setPollingInterval] = useState<any>(null);
 
   const sendBackgroundMessage = useCallback(
@@ -292,18 +319,30 @@ export const Popup: React.FC = () => {
 
   const fetchSuggestions = useCallback(async () => {
     try {
-      const response = await sendBackgroundMessage("GET_PAGE_SUGGESTIONS");
+      const response = await sendBackgroundMessage("GET_PAGE_SUGGESTIONS", {
+        userGoal,
+      });
       if (response.success && response.suggestions) {
         setSuggestions(response.suggestions);
+        if (response.redactionManifest) {
+          setRedactionManifest(response.redactionManifest);
+        }
+        if (typeof response.serverConnected === "boolean") {
+          setServerConnected(response.serverConnected);
+        }
       }
     } catch {}
-  }, [sendBackgroundMessage]);
+  }, [sendBackgroundMessage, userGoal]);
 
   const refreshStatus = useCallback(async () => {
     try {
       const response = await sendBackgroundMessage("GET_PRIVACY_STATUS");
-      if (response.success && response.status) {
-        setPrivacyStatus(response.status);
+      if (response.success) {
+        if (response.status) setPrivacyStatus(response.status);
+        if (response.redactionManifest) setRedactionManifest(response.redactionManifest);
+        if (typeof response.serverConnected === "boolean") {
+          setServerConnected(response.serverConnected);
+        }
       }
     } catch {}
   }, [sendBackgroundMessage]);
@@ -340,9 +379,34 @@ export const Popup: React.FC = () => {
       return;
     }
 
+    // Reset previous task state immediately to ensure NO stale completed card is shown
     setLoading(true);
     setError(null);
     setQuickFeedback(null);
+    setServerPlan(null);
+    setValidatedActions([]);
+
+    const newTaskId = `task-${Date.now()}`;
+    setAgentExecution({
+      taskId: newTaskId,
+      sessionId: `sess-${Date.now()}`,
+      goal: userGoal.trim(),
+      userGoal: userGoal.trim(),
+      classification: {
+        mode: "click",
+        confidence: 0.9,
+        interpretation: userGoal.trim(),
+        requiresClarification: false,
+        riskLevel: "low",
+      },
+      plan: { summary: "Analyzing page...", confidence: 0.9, requiresUserConfirmation: false, actions: [] },
+      currentStep: 0,
+      maxSteps: 10,
+      steps: [],
+      status: "observing",
+      isExecuting: true,
+      error: null,
+    });
 
     try {
       const response = await sendBackgroundMessage("ANALYZE_AND_PLAN", {
@@ -350,21 +414,49 @@ export const Popup: React.FC = () => {
       });
 
       if (!response.success) {
-        setError(response.error || "Failed to analyze page. Refresh the tab and try again.");
+        const errorMsg = response.error || "Couldn't complete that action. Please check the page and try again.";
+        setError(errorMsg);
+        setAgentExecution({
+          taskId: newTaskId,
+          sessionId: `sess-${Date.now()}`,
+          goal: userGoal.trim(),
+          userGoal: userGoal.trim(),
+          classification: {
+            mode: "click",
+            confidence: 0.5,
+            interpretation: userGoal.trim(),
+            requiresClarification: false,
+            riskLevel: "low",
+          },
+          plan: { summary: "Task failed", confidence: 0, requiresUserConfirmation: false, actions: [] },
+          currentStep: 0,
+          maxSteps: 1,
+          steps: [],
+          status: "failed",
+          isExecuting: false,
+          error: errorMsg,
+        });
         return;
       }
 
       setLastPayload(response.payload);
+      if (response.payload?.redactionManifest) {
+        setRedactionManifest(response.payload.redactionManifest);
+      }
       setServerPlan(response.plan);
       setValidatedActions(response.validatedActions || []);
       setAgentExecution(response.agentExecution);
 
       if (response.agentExecution?.isExecuting) {
-        const interval = setInterval(pollAgentState, 800);
+        const interval = setInterval(pollAgentState, 600);
         setPollingInterval(interval);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed");
+      const errorMsg = err instanceof Error ? err.message : "Analysis failed";
+      setError(errorMsg);
+      setAgentExecution((prev) =>
+        prev ? { ...prev, status: "failed", isExecuting: false, error: errorMsg } : null
+      );
     } finally {
       setLoading(false);
     }
@@ -374,7 +466,36 @@ export const Popup: React.FC = () => {
     try {
       setLoading(true);
       setError(null);
+      setServerPlan(null);
+      setValidatedActions([]);
       setQuickFeedback(`Executing: ${suggestion.label}…`);
+
+      const newTaskId = `task-quick-${Date.now()}`;
+      setAgentExecution({
+        taskId: newTaskId,
+        sessionId: `sess-quick-${Date.now()}`,
+        goal: suggestion.label,
+        userGoal: suggestion.label,
+        classification: {
+          mode: suggestion.category === "scroll" ? "scroll" : "click",
+          confidence: 0.95,
+          interpretation: suggestion.label,
+          requiresClarification: false,
+          riskLevel: "low",
+        },
+        plan: {
+          summary: suggestion.action.reason || suggestion.label,
+          confidence: 0.95,
+          requiresUserConfirmation: false,
+          actions: [suggestion.action],
+        },
+        currentStep: 0,
+        maxSteps: 1,
+        steps: [],
+        status: "executing",
+        isExecuting: true,
+        error: null,
+      });
 
       const response = await sendBackgroundMessage("EXECUTE_QUICK_ACTION", {
         action: suggestion.action,
@@ -388,15 +509,40 @@ export const Popup: React.FC = () => {
         setQuickFeedback(
           response.verified
             ? `${suggestion.label} ✓`
-            : `${suggestion.label} dispatched`
+            : `${suggestion.label} executed`
         );
       } else {
-        setError(response.error || "Action failed to execute");
+        const errorMsg = response.error || "Action failed to execute";
+        setError(errorMsg);
         setQuickFeedback(null);
+        setAgentExecution({
+          taskId: newTaskId,
+          sessionId: `sess-quick-${Date.now()}`,
+          goal: suggestion.label,
+          userGoal: suggestion.label,
+          classification: {
+            mode: "click",
+            confidence: 0.5,
+            interpretation: suggestion.label,
+            requiresClarification: false,
+            riskLevel: "low",
+          },
+          plan: { summary: "Action failed", confidence: 0, requiresUserConfirmation: false, actions: [] },
+          currentStep: 0,
+          maxSteps: 1,
+          steps: [],
+          status: "failed",
+          isExecuting: false,
+          error: errorMsg,
+        });
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Quick action failed");
+      const errorMsg = err instanceof Error ? err.message : "Quick action failed";
+      setError(errorMsg);
       setQuickFeedback(null);
+      setAgentExecution((prev) =>
+        prev ? { ...prev, status: "failed", isExecuting: false, error: errorMsg } : null
+      );
     } finally {
       setLoading(false);
     }
@@ -431,10 +577,18 @@ export const Popup: React.FC = () => {
           })
         );
       } else if (!response.success) {
-        setError(response.error || "Action confirmation failed");
+        const errorMsg = response.error || "Action confirmation failed";
+        setError(errorMsg);
+        setAgentExecution((prev) =>
+          prev ? { ...prev, status: "failed", isExecuting: false, error: errorMsg } : null
+        );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Action confirmation failed");
+      const errorMsg = err instanceof Error ? err.message : "Action confirmation failed";
+      setError(errorMsg);
+      setAgentExecution((prev) =>
+        prev ? { ...prev, status: "failed", isExecuting: false, error: errorMsg } : null
+      );
     } finally {
       setLoading(false);
     }
@@ -447,7 +601,9 @@ export const Popup: React.FC = () => {
       if (response.success && response.agentExecution) {
         setAgentExecution(response.agentExecution);
       } else {
-        setAgentExecution((prev) => (prev ? { ...prev, isExecuting: false, status: "idle", plan: null } : null));
+        setAgentExecution((prev) =>
+          prev ? { ...prev, isExecuting: false, status: "idle", plan: null } : null
+        );
       }
       setValidatedActions((prev) =>
         prev.map((a) => ({ ...a, policy: "reject" as ActionPolicy, reason: "Cancelled by user" }))
@@ -461,7 +617,9 @@ export const Popup: React.FC = () => {
 
   const handleCancelAgent = async () => {
     await sendBackgroundMessage("CANCEL_AGENT");
-    setAgentExecution((prev: AgentExecutionContext | null) => prev ? { ...prev, isExecuting: false, status: "stopped" } : null);
+    setAgentExecution((prev: AgentExecutionContext | null) =>
+      prev ? { ...prev, isExecuting: false, status: "stopped" } : null
+    );
     if (pollingInterval) {
       clearInterval(pollingInterval);
       setPollingInterval(null);
@@ -480,12 +638,18 @@ export const Popup: React.FC = () => {
     setValidatedActions([]);
     setAgentExecution(null);
     setPrivacyStatus(null);
+    setRedactionManifest([]);
     setError(null);
     setQuickFeedback(null);
     fetchSuggestions();
   };
 
-  const redactedCount = lastPayload?.redactionManifest?.length ?? privacyStatus?.redactedCount ?? 0;
+  // Summarize redactions into clean privacy manifest
+  const redactionSummary = useMemo(() => {
+    const manifest = lastPayload?.redactionManifest || redactionManifest;
+    return summarizeRedactionManifest(manifest);
+  }, [lastPayload, redactionManifest]);
+
   const payloadSize = lastPayload?.sanitizedScreenshot?.length ?? 0;
   const payloadKb = Math.round(payloadSize / 1024);
   const currentStep = agentExecution?.currentStep ?? 0;
@@ -493,7 +657,7 @@ export const Popup: React.FC = () => {
   const isExecuting = agentExecution?.isExecuting ?? false;
   const agentStatus = agentExecution?.status ?? "idle";
 
-  const showActiveTask = !!serverPlan || (!!agentExecution && agentStatus !== "idle");
+  const showActiveTask = !!agentExecution && agentStatus !== "idle";
 
   return (
     <div className="popup">
@@ -505,23 +669,23 @@ export const Popup: React.FC = () => {
           </span>
           <div className="popup__titles">
             <h1 className="popup__title">Veil</h1>
-            <span className="popup__subtitle">Private browsing agent</span>
+            <span className="popup__subtitle">Privacy-first browser agent</span>
           </div>
         </div>
 
         <div className="popup__status-badge">
-          <span className="status-dot status-dot--ok" />
-          <span>Protected on device</span>
+          <span className={`status-dot ${serverConnected ? "status-dot--ok" : "status-dot--warn"}`} />
+          <span>{serverConnected ? "Protected on device" : "Local agent active"}</span>
         </div>
       </header>
 
       <div className="popup__body">
-        {/* Suggested Actions (Zero Typing) */}
+        {/* Quick Actions (Zero Typing) */}
         {suggestions.length > 0 && !isExecuting && (
           <div className="popup__section popup__suggestions">
             <div className="section-label">
               <SparkleIcon size={11} strokeWidth={2} />
-              <span>Suggested actions</span>
+              <span>Quick actions</span>
             </div>
             <div className="suggestion-chips">
               {suggestions.map((sug) => (
@@ -535,8 +699,12 @@ export const Popup: React.FC = () => {
                 >
                   {sug.category === "scroll" && <span className="chip-icon">↓</span>}
                   {sug.category === "search" && <SearchIcon size={11} strokeWidth={2} />}
-                  {sug.category === "find" && <TargetIcon size={11} strokeWidth={2} />}
+                  {(sug.icon === "navigate" || sug.label.startsWith("Open ")) && <span className="chip-icon">↗</span>}
+                  {sug.label.startsWith("Submit") && <span className="chip-icon">✓</span>}
                   {sug.category === "form" && <SettingsIcon size={11} strokeWidth={2} />}
+                  {sug.category === "action" && !sug.label.startsWith("Open ") && !sug.label.startsWith("Submit") && (
+                    <PlayIcon size={11} strokeWidth={2} />
+                  )}
                   <span>{sug.label}</span>
                 </button>
               ))}
@@ -559,7 +727,7 @@ export const Popup: React.FC = () => {
               id="user-goal"
               value={userGoal}
               onChange={(e) => setUserGoal(e.target.value)}
-              placeholder="Tell Veil what you want to do on this page…"
+              placeholder="Ask Veil to do something on this page…"
               rows={2}
               className="goal-textarea"
               disabled={loading || isExecuting}
@@ -572,11 +740,11 @@ export const Popup: React.FC = () => {
             />
             <div className="goal-box__footer">
               <span className="goal-box__help">
-                Describe a task in plain language. Veil acts only on your request.
+                Veil acts only on your request.
               </span>
               <button
                 onClick={handleCapture}
-                disabled={loading || !active || !userGoal.trim() || !serverConnected || isExecuting}
+                disabled={loading || !userGoal.trim() || isExecuting}
                 className="btn btn--primary"
               >
                 {loading ? (
@@ -595,15 +763,7 @@ export const Popup: React.FC = () => {
           </div>
         </div>
 
-        {/* Error Alert */}
-        {error && (
-          <div className="alert alert--error" role="alert">
-            <AlertIcon size={13} strokeWidth={2} />
-            <span>{error}</span>
-          </div>
-        )}
-
-        {/* Active Task Tracking */}
+        {/* Active Task Tracking (Authoritative Single State) */}
         {showActiveTask && (
           <div className="popup__section">
             <AgentStateIndicator
@@ -611,9 +771,10 @@ export const Popup: React.FC = () => {
               classification={agentExecution?.classification ?? undefined}
               currentStep={currentStep}
               totalSteps={totalSteps}
+              error={agentExecution?.error || error}
             />
 
-            {serverPlan && (
+            {serverPlan && agentStatus !== "failed" && (
               <div className="plan-container">
                 <div className="plan-summary">{serverPlan.summary}</div>
 
@@ -678,11 +839,89 @@ export const Popup: React.FC = () => {
                 </div>
               </div>
             )}
+
+            {agentStatus === "failed" && (
+              <div className="plan-controls" style={{ marginTop: "10px" }}>
+                <button
+                  onClick={handleClearSession}
+                  className="btn btn--secondary btn--block"
+                >
+                  Clear & Try Again
+                </button>
+              </div>
+            )}
           </div>
         )}
+
+        {/* Dedicated Privacy Protection & Redaction Box */}
+        <div className="popup__section">
+          <div className="privacy-card">
+            <button
+              type="button"
+              className="privacy-card__header"
+              onClick={() => setRedactionExpanded((v) => !v)}
+              aria-expanded={redactionExpanded}
+            >
+              <div className="privacy-card__title">
+                <ShieldIcon size={13} strokeWidth={2.4} />
+                <span>Privacy protection</span>
+              </div>
+              <div className="privacy-card__status">
+                {redactionSummary.totalCount > 0 ? (
+                  <span className="privacy-badge privacy-badge--active">
+                    {redactionSummary.totalCount} item{redactionSummary.totalCount > 1 ? "s" : ""} protected
+                  </span>
+                ) : (
+                  <span className="privacy-badge privacy-badge--neutral">
+                    No sensitive data
+                  </span>
+                )}
+                <ChevronIcon
+                  size={11}
+                  className={`chevron ${redactionExpanded ? "chevron--expanded" : ""}`}
+                />
+              </div>
+            </button>
+
+            {redactionExpanded && (
+              <div className="privacy-card__drawer">
+                {redactionSummary.groups.length > 0 ? (
+                  <>
+                    <div className="privacy-card__intro">
+                      Protected on-device before any network transmission:
+                    </div>
+                    <div className="redaction-list">
+                      {redactionSummary.groups.map((group) => (
+                        <div key={group.category} className="redaction-item">
+                          <div className="redaction-item__cat">
+                            <CheckIcon size={10} strokeWidth={2.4} />
+                            <span>{group.label}</span>
+                          </div>
+                          <span className="redaction-item__count">
+                            {group.count}
+                          </span>
+                          <span className="redaction-item__token">
+                            {group.replacementToken}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="privacy-card__empty">
+                    No sensitive data detected on this page.
+                  </div>
+                )}
+                <div className="privacy-card__notice">
+                  🔒 Raw personal data never leaves your device.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* Trust & Expandable Privacy Footer */}
+      {/* Expandable Technical Details Footer */}
       <footer className="popup__footer">
         <button
           type="button"
@@ -691,8 +930,8 @@ export const Popup: React.FC = () => {
           aria-expanded={privacyExpanded}
         >
           <div className="privacy-bar__left">
-            <ShieldIcon size={12} strokeWidth={2.4} />
-            <span>Sensitive data protected on-device</span>
+            <ServerIcon size={11} strokeWidth={2} />
+            <span>Technical details</span>
           </div>
           <ChevronIcon
             size={11}
@@ -704,7 +943,7 @@ export const Popup: React.FC = () => {
           <div className="tech-drawer">
             <div className="tech-drawer__row">
               <span className="tech-drawer__label">Redacted items:</span>
-              <span className="tech-drawer__val">{redactedCount} elements protected</span>
+              <span className="tech-drawer__val">{redactionSummary.totalCount} elements</span>
             </div>
             <div className="tech-drawer__row">
               <span className="tech-drawer__label">Sanitized payload:</span>
@@ -715,8 +954,10 @@ export const Popup: React.FC = () => {
               <span className="tech-drawer__val">Client-side only</span>
             </div>
             <div className="tech-drawer__row">
-              <span className="tech-drawer__label">Planner server:</span>
-              <span className="tech-drawer__val">{serverUrl} ({serverConnected ? "Live" : "Offline"})</span>
+              <span className="tech-drawer__label">Planner backend:</span>
+              <span className="tech-drawer__val">
+                {serverUrl} ({serverConnected ? "Connected" : "Offline / Local fallback"})
+              </span>
             </div>
           </div>
         )}

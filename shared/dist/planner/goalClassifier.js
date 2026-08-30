@@ -305,10 +305,10 @@ function extractIntentFromGoal(goal) {
             intent: {
                 action: "submit",
                 target,
-                risk: "medium",
-                requiresConfirmation: true,
+                risk: "low",
+                requiresConfirmation: false,
             },
-            confidence: 0.92,
+            confidence: 0.95,
         };
     }
     // 10. Navigate queries

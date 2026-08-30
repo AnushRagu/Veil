@@ -806,6 +806,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               lastCapture: state.sessionId ? new Date().toISOString() : undefined,
               sessionActive: !!state.sessionId,
             },
+            redactionManifest: state.lastRedactionManifest,
           });
           break;
         }
@@ -827,8 +828,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           const elements = state.pageMap ? state.pageMap.elements : extractSanitizedElements(document);
           const pageMap = state.pageMap || buildPageMap(elements);
           assignElementIds(elements);
-          const suggestions = generatePageSuggestions(pageMap);
-          sendResponse({ success: true, suggestions, pageMap, redactionCount: state.lastRedactionManifest.length });
+          const suggestions = generatePageSuggestions(pageMap, message.userGoal);
+          sendResponse({
+            success: true,
+            suggestions,
+            pageMap,
+            redactionCount: state.lastRedactionManifest.length,
+            redactionManifest: state.lastRedactionManifest,
+          });
           break;
         }
 

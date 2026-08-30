@@ -1,4 +1,4 @@
-export function generatePageSuggestions(pageMap) {
+export function generatePageSuggestions(pageMap, currentUserGoal) {
     if (!pageMap || !pageMap.elements || pageMap.elements.length === 0) {
         return [
             {
@@ -21,7 +21,8 @@ export function generatePageSuggestions(pageMap) {
     }
     const suggestions = [];
     const elements = pageMap.elements;
-    // 1. Search Suggestion
+    const goalLower = (currentUserGoal || "").trim().toLowerCase();
+    // 1. Search Suggestion (Actionable: Search this page / Search products)
     const searchElement = elements.find((el) => el.visible &&
         el.enabled &&
         !el.sensitive &&
@@ -31,10 +32,16 @@ export function generatePageSuggestions(pageMap) {
             (el.label && el.label.toLowerCase().includes("search")) ||
             (el.name && el.name.toLowerCase().includes("search")) ||
             (el.elementId && el.elementId.toLowerCase().includes("search"))));
-    if (searchElement) {
+    if (searchElement && !goalLower.includes("search")) {
+        let searchLabel = "Search this page";
+        const placeholder = (searchElement.placeholder || "").trim().toLowerCase();
+        const label = (searchElement.label || "").trim().toLowerCase();
+        if (placeholder.includes("product") || label.includes("product")) {
+            searchLabel = "Search products";
+        }
         suggestions.push({
             id: `sug-search-${searchElement.id}`,
-            label: "Search page",
+            label: searchLabel,
             category: "search",
             action: {
                 id: `act-search-${searchElement.id}`,
@@ -45,18 +52,18 @@ export function generatePageSuggestions(pageMap) {
                     label: searchElement.label || searchElement.placeholder || "Search",
                     bounds: searchElement.bounds,
                 },
-                reason: "Focus search field to enter query",
+                reason: `Focus ${searchLabel} to enter query`,
                 confidence: 0.95,
                 risk: "low",
             },
             icon: "search",
-            description: "Focus search input",
+            description: `Focus ${searchLabel}`,
         });
     }
-    // 2. Scroll Suggestion
+    // 2. Scroll Suggestion (Actionable: Scroll down)
     const viewportHeight = pageMap.viewport?.height || 800;
     const elementsBelowFold = elements.some((el) => el.bounds && el.bounds.y + el.bounds.height > viewportHeight);
-    if (elementsBelowFold || elements.length > 5) {
+    if ((elementsBelowFold || elements.length > 5) && !goalLower.includes("scroll")) {
         suggestions.push({
             id: "sug-scroll-down",
             label: "Scroll down",
@@ -74,18 +81,33 @@ export function generatePageSuggestions(pageMap) {
             description: "Move viewport down",
         });
     }
-    // 3. Prominent Buttons / Key Actions (Find <Button>)
-    const candidateButtons = elements.filter((el) => el.visible &&
+    // 3. Prominent Actionable Buttons & Result Links (Click / Open actions)
+    const candidateInteractive = elements.filter((el) => el.visible &&
         el.enabled &&
         !el.sensitive &&
-        (el.role === "button" || el.tagName === "button" || (el.role === "link" && el.label && el.label.length < 30)) &&
+        (el.role === "button" || el.tagName === "button" || (el.role === "link" && el.label && el.label.length < 35)) &&
         el.label &&
-        el.label.trim().length > 0 &&
-        el.label.trim().length < 35 &&
+        el.label.trim().length >= 2 &&
+        el.label.trim().length <= 35 &&
         !el.label.toLowerCase().includes("close") &&
-        !el.label.toLowerCase().includes("privacy"));
-    const priorityKeywords = ["submit", "continue", "next", "sign in", "log in", "search", "filter", "download", "save", "add", "send", "view"];
-    const sortedButtons = [...candidateButtons].sort((a, b) => {
+        !el.label.toLowerCase().includes("privacy") &&
+        !el.label.toLowerCase().includes("terms"));
+    const priorityKeywords = [
+        "submit",
+        "settings",
+        "youtube",
+        "google home",
+        "continue",
+        "next",
+        "sign in",
+        "log in",
+        "save",
+        "download",
+        "cart",
+        "checkout",
+        "wikipedia",
+    ];
+    const sortedInteractive = [...candidateInteractive].sort((a, b) => {
         const aText = (a.label || "").toLowerCase();
         const bText = (b.label || "").toLowerCase();
         const aPriority = priorityKeywords.some((kw) => aText.includes(kw)) ? 1 : 0;
@@ -94,62 +116,151 @@ export function generatePageSuggestions(pageMap) {
             return bPriority - aPriority;
         return (a.bounds?.y ?? 0) - (b.bounds?.y ?? 0);
     });
-    for (const btn of sortedButtons.slice(0, 3)) {
+    for (const item of sortedInteractive) {
         if (suggestions.length >= 4)
             break;
-        const labelTrimmed = btn.label.trim();
-        if (labelTrimmed.toLowerCase() === "search" && searchElement)
+        const labelTrimmed = item.label.trim();
+        const labelLower = labelTrimmed.toLowerCase();
+        // Skip auxiliary search icons (like "Search by voice" or "Search by image" if searchbox exists)
+        if (searchElement &&
+            (labelLower === "search" ||
+                labelLower.includes("voice") ||
+                labelLower.includes("image") ||
+                labelLower.includes("search by") ||
+                labelLower.includes("search page"))) {
             continue;
+        }
+        // Skip if it duplicates current user goal
+        if (goalLower) {
+            const goalKeywords = goalLower
+                .split(/\s+/)
+                .filter((w) => w.length > 2 && !["the", "find", "click", "and", "for", "button", "link"].includes(w));
+            const labelKeywords = labelLower
+                .split(/\s+/)
+                .filter((w) => w.length > 2 && !["the", "find", "click", "and", "for", "button", "link"].includes(w));
+            const hasOverlap = labelKeywords.some((kw) => goalKeywords.includes(kw));
+            if (hasOverlap)
+                continue;
+        }
+        // Format as direct action (e.g. "Submit form", "Open settings", "Open YouTube", "Open Google Home")
+        let actionLabel = labelTrimmed;
+        if (labelLower.includes("submit")) {
+            actionLabel = "Submit form";
+        }
+        else if (labelLower.includes("setting") || labelLower.includes("modal")) {
+            actionLabel = "Open settings";
+        }
+        else if (item.role === "link" ||
+            labelLower.includes("youtube") ||
+            labelLower.includes("google") ||
+            labelLower.includes("home") ||
+            labelLower.includes("wiki")) {
+            if (!labelLower.startsWith("open ") && !labelLower.startsWith("go to ")) {
+                actionLabel = `Open ${labelTrimmed}`;
+            }
+        }
+        // Ensure no duplicate suggestions
+        if (suggestions.some((s) => s.label.toLowerCase() === actionLabel.toLowerCase())) {
+            continue;
+        }
         suggestions.push({
-            id: `sug-find-${btn.id}`,
-            label: `Find "${labelTrimmed}"`,
-            category: "find",
+            id: `sug-act-${item.id}`,
+            label: actionLabel,
+            category: "action",
             action: {
-                id: `act-find-${btn.id}`,
-                type: "highlight",
+                id: `act-click-${item.id}`,
+                type: "click",
                 target: {
-                    elementId: btn.id,
-                    selector: btn.selector,
+                    elementId: item.id,
+                    selector: item.selector,
                     label: labelTrimmed,
-                    bounds: btn.bounds,
+                    bounds: item.bounds,
                 },
-                reason: `Locate and highlight "${labelTrimmed}" on page`,
+                reason: `Execute action: ${actionLabel}`,
                 confidence: 0.95,
                 risk: "low",
             },
-            icon: "target",
-            description: `Highlight ${labelTrimmed}`,
+            icon: item.role === "link" ? "navigate" : "click",
+            description: actionLabel,
         });
     }
-    // 4. Form Fields Suggestion if inputs exist
+    // 4. Form Action Suggestion (Actionable: Fill form)
     const formFields = elements.filter((el) => el.visible &&
         el.enabled &&
         !el.sensitive &&
         (el.role === "textbox" || el.role === "combobox" || el.tagName === "input" || el.tagName === "textarea") &&
         el !== searchElement);
-    if (formFields.length > 0 && suggestions.length < 5) {
+    if (formFields.length > 0 && suggestions.length < 5 && !goalLower.includes("form")) {
         const firstField = formFields[0];
-        const fieldName = firstField.label || firstField.placeholder || "form field";
         suggestions.push({
             id: `sug-form-${firstField.id}`,
-            label: `Find form fields`,
+            label: "Fill form",
             category: "form",
             action: {
                 id: `act-form-${firstField.id}`,
-                type: "highlight",
+                type: "focus",
                 target: {
                     elementId: firstField.id,
                     selector: firstField.selector,
-                    label: fieldName,
+                    label: firstField.label || firstField.placeholder || "form input",
                     bounds: firstField.bounds,
                 },
-                reason: `Highlight available form fields on this page`,
+                reason: "Focus available form field to fill",
                 confidence: 0.9,
                 risk: "low",
             },
             icon: "form",
-            description: "Locate form fields",
+            description: "Focus form fields",
         });
     }
     return suggestions.slice(0, 5);
+}
+const CATEGORY_META = {
+    email: { label: "Email Address", replacementToken: "[REDACTED_EMAIL]" },
+    phone: { label: "Phone Number", replacementToken: "[REDACTED_PHONE]" },
+    password: { label: "Password", replacementToken: "[REDACTED_PASSWORD]" },
+    otp: { label: "One-Time Code (OTP)", replacementToken: "[REDACTED_OTP]" },
+    credit_card: { label: "Credit Card Number", replacementToken: "[REDACTED_CARD]" },
+    cvv: { label: "Card Security Code (CVV)", replacementToken: "[REDACTED_CVV]" },
+    aadhaar: { label: "Aadhaar ID (India)", replacementToken: "[REDACTED_AADHAAR]" },
+    pan: { label: "PAN Card (India)", replacementToken: "[REDACTED_PAN]" },
+    address: { label: "Physical Address / ZIP", replacementToken: "[REDACTED_ADDRESS]" },
+    account_number: { label: "Bank Account Number", replacementToken: "[REDACTED_ACCOUNT]" },
+    face: { label: "Profile Photo / Face", replacementToken: "[REDACTED_IMAGE]" },
+    explicit_sensitive: { label: "Sensitive Form Field", replacementToken: "[REDACTED_PII]" },
+    custom: { label: "Sensitive Pattern / Token", replacementToken: "[REDACTED]" },
+};
+export function summarizeRedactionManifest(manifest) {
+    if (!manifest || manifest.length === 0) {
+        return {
+            totalCount: 0,
+            groups: [],
+            hasSensitiveData: false,
+        };
+    }
+    const countMap = new Map();
+    for (const entry of manifest) {
+        const cat = entry.category || "custom";
+        countMap.set(cat, (countMap.get(cat) || 0) + 1);
+    }
+    const groups = [];
+    for (const [category, count] of countMap.entries()) {
+        const meta = CATEGORY_META[category] || {
+            label: category.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+            replacementToken: "[REDACTED]",
+        };
+        groups.push({
+            category,
+            label: meta.label,
+            count,
+            replacementToken: meta.replacementToken,
+        });
+    }
+    // Sort groups by count descending
+    groups.sort((a, b) => b.count - a.count);
+    return {
+        totalCount: manifest.length,
+        groups,
+        hasSensitiveData: manifest.length > 0,
+    };
 }

@@ -1551,6 +1551,7 @@ export interface AgentStep {
     details?: Record<string, any>;
 }
 export interface AgentExecutionContext {
+    taskId?: string;
     goal: string;
     classification: GoalClassification;
     plan: ServerPlan;
@@ -1562,6 +1563,8 @@ export interface AgentExecutionContext {
     sessionId: string;
     userGoal: string;
     isExecuting: boolean;
+    error?: string | null;
+    serverConnected?: boolean;
 }
 export type SuggestionCategory = "scroll" | "find" | "search" | "form" | "action";
 export interface PageSuggestion {
@@ -1572,5 +1575,16 @@ export interface PageSuggestion {
     icon?: string;
     risk?: ActionRiskLevel;
     description?: string;
+}
+export interface RedactionCategorySummary {
+    category: RedactionCategory;
+    label: string;
+    count: number;
+    replacementToken: string;
+}
+export interface RedactionSummary {
+    totalCount: number;
+    groups: RedactionCategorySummary[];
+    hasSensitiveData: boolean;
 }
 //# sourceMappingURL=index.d.ts.map

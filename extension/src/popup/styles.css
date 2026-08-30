@@ -579,6 +579,153 @@ body {
 }
 
 /* ============================================================
+   Privacy Protection Card & Redaction Breakdown
+   ============================================================ */
+
+.privacy-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  transition: border-color 0.15s ease;
+}
+
+.privacy-card:hover {
+  border-color: #475569;
+}
+
+.privacy-card__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.privacy-card__title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--primary-text);
+  font-weight: 600;
+}
+
+.privacy-card__status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.privacy-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.privacy-badge--active {
+  background: var(--success-soft);
+  color: var(--success-text);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.privacy-badge--neutral {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+.privacy-card__drawer {
+  padding: 10px 12px 12px;
+  background: rgba(15, 23, 42, 0.6);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.privacy-card__intro {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.redaction-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.redaction-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  gap: 8px;
+}
+
+.redaction-item__cat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text);
+  flex: 1;
+}
+
+.redaction-item__cat svg {
+  color: var(--success-text);
+  flex-shrink: 0;
+}
+
+.redaction-item__count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.redaction-item__token {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--primary-text);
+  background: var(--primary-soft);
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.privacy-card__empty {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.privacy-card__notice {
+  font-size: 10.5px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  padding-top: 6px;
+}
+
+.agent-indicator__error {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--danger-text);
+  margin-top: 4px;
+}
+
+/* ============================================================
    Footer & Expandable Technical Drawer
    ============================================================ */
 

@@ -28,6 +28,7 @@ function findElementByLabelOrRole(pageMap, keywords) {
         const ariaLower = el.ariaLabel?.toLowerCase() || "";
         const typeLower = el.inputType?.toLowerCase() || "";
         const selectorLower = el.selector?.toLowerCase() || "";
+        const hrefLower = el.href?.toLowerCase() || "";
         for (const kw of lowerKeywords) {
             const isRoleKeyword = roleKeywords.has(kw);
             let kwMatched = false;
@@ -57,6 +58,10 @@ function findElementByLabelOrRole(pageMap, keywords) {
             }
             if (ariaLower.includes(kw)) {
                 score += 45;
+                kwMatched = true;
+            }
+            if (hrefLower.includes(kw)) {
+                score += 60;
                 kwMatched = true;
             }
             if (typeLower.includes(kw)) {
@@ -344,14 +349,14 @@ function planForDelete(classification, pageMap) {
 function planForSubmit(_classification, pageMap) {
     const submitBtn = findSubmitLikeElement(pageMap);
     if (submitBtn && !submitBtn.sensitive) {
-        const action = createAction("click", submitBtn, `Submit form via "${submitBtn.label}"`, 0.9, {
-            risk: "medium",
+        const action = createAction("click", submitBtn, `Click "${submitBtn.label}" to submit form`, 0.95, {
+            risk: "low",
         });
         return {
             actions: action ? [action] : [],
-            summary: `Will submit form via "${submitBtn.label}".`,
-            confidence: 0.9,
-            requiresConfirmation: true,
+            summary: `Will submit form by clicking "${submitBtn.label}".`,
+            confidence: 0.95,
+            requiresConfirmation: false,
         };
     }
     return {

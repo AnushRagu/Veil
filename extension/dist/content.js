@@ -4706,7 +4706,7 @@
   });
 
   // ../shared/src/suggestions/suggestionEngine.ts
-  function generatePageSuggestions(pageMap) {
+  function generatePageSuggestions(pageMap, currentUserGoal) {
     if (!pageMap || !pageMap.elements || pageMap.elements.length === 0) {
       return [
         {
@@ -4729,13 +4729,20 @@
     }
     const suggestions = [];
     const elements = pageMap.elements;
+    const goalLower = (currentUserGoal || "").trim().toLowerCase();
     const searchElement = elements.find(
       (el) => el.visible && el.enabled && !el.sensitive && (el.role === "searchbox" || el.type === "search" || el.placeholder && el.placeholder.toLowerCase().includes("search") || el.label && el.label.toLowerCase().includes("search") || el.name && el.name.toLowerCase().includes("search") || el.elementId && el.elementId.toLowerCase().includes("search"))
     );
-    if (searchElement) {
+    if (searchElement && !goalLower.includes("search")) {
+      let searchLabel = "Search this page";
+      const placeholder = (searchElement.placeholder || "").trim().toLowerCase();
+      const label = (searchElement.label || "").trim().toLowerCase();
+      if (placeholder.includes("product") || label.includes("product")) {
+        searchLabel = "Search products";
+      }
       suggestions.push({
         id: `sug-search-${searchElement.id}`,
-        label: "Search page",
+        label: searchLabel,
         category: "search",
         action: {
           id: `act-search-${searchElement.id}`,
@@ -4746,17 +4753,17 @@
             label: searchElement.label || searchElement.placeholder || "Search",
             bounds: searchElement.bounds
           },
-          reason: "Focus search field to enter query",
+          reason: `Focus ${searchLabel} to enter query`,
           confidence: 0.95,
           risk: "low"
         },
         icon: "search",
-        description: "Focus search input"
+        description: `Focus ${searchLabel}`
       });
     }
     const viewportHeight = pageMap.viewport?.height || 800;
     const elementsBelowFold = elements.some((el) => el.bounds && el.bounds.y + el.bounds.height > viewportHeight);
-    if (elementsBelowFold || elements.length > 5) {
+    if ((elementsBelowFold || elements.length > 5) && !goalLower.includes("scroll")) {
       suggestions.push({
         id: "sug-scroll-down",
         label: "Scroll down",
@@ -4774,11 +4781,25 @@
         description: "Move viewport down"
       });
     }
-    const candidateButtons = elements.filter(
-      (el) => el.visible && el.enabled && !el.sensitive && (el.role === "button" || el.tagName === "button" || el.role === "link" && el.label && el.label.length < 30) && el.label && el.label.trim().length > 0 && el.label.trim().length < 35 && !el.label.toLowerCase().includes("close") && !el.label.toLowerCase().includes("privacy")
+    const candidateInteractive = elements.filter(
+      (el) => el.visible && el.enabled && !el.sensitive && (el.role === "button" || el.tagName === "button" || el.role === "link" && el.label && el.label.length < 35) && el.label && el.label.trim().length >= 2 && el.label.trim().length <= 35 && !el.label.toLowerCase().includes("close") && !el.label.toLowerCase().includes("privacy") && !el.label.toLowerCase().includes("terms")
     );
-    const priorityKeywords = ["submit", "continue", "next", "sign in", "log in", "search", "filter", "download", "save", "add", "send", "view"];
-    const sortedButtons = [...candidateButtons].sort((a, b) => {
+    const priorityKeywords = [
+      "submit",
+      "settings",
+      "youtube",
+      "google home",
+      "continue",
+      "next",
+      "sign in",
+      "log in",
+      "save",
+      "download",
+      "cart",
+      "checkout",
+      "wikipedia"
+    ];
+    const sortedInteractive = [...candidateInteractive].sort((a, b) => {
       const aText = (a.label || "").toLowerCase();
       const bText = (b.label || "").toLowerCase();
       const aPriority = priorityKeywords.some((kw) => aText.includes(kw)) ? 1 : 0;
@@ -4786,56 +4807,77 @@
       if (aPriority !== bPriority) return bPriority - aPriority;
       return (a.bounds?.y ?? 0) - (b.bounds?.y ?? 0);
     });
-    for (const btn of sortedButtons.slice(0, 3)) {
+    for (const item of sortedInteractive) {
       if (suggestions.length >= 4) break;
-      const labelTrimmed = btn.label.trim();
-      if (labelTrimmed.toLowerCase() === "search" && searchElement) continue;
+      const labelTrimmed = item.label.trim();
+      const labelLower = labelTrimmed.toLowerCase();
+      if (searchElement && (labelLower === "search" || labelLower.includes("voice") || labelLower.includes("image") || labelLower.includes("search by") || labelLower.includes("search page"))) {
+        continue;
+      }
+      if (goalLower) {
+        const goalKeywords = goalLower.split(/\s+/).filter((w) => w.length > 2 && !["the", "find", "click", "and", "for", "button", "link"].includes(w));
+        const labelKeywords = labelLower.split(/\s+/).filter((w) => w.length > 2 && !["the", "find", "click", "and", "for", "button", "link"].includes(w));
+        const hasOverlap = labelKeywords.some((kw) => goalKeywords.includes(kw));
+        if (hasOverlap) continue;
+      }
+      let actionLabel = labelTrimmed;
+      if (labelLower.includes("submit")) {
+        actionLabel = "Submit form";
+      } else if (labelLower.includes("setting") || labelLower.includes("modal")) {
+        actionLabel = "Open settings";
+      } else if (item.role === "link" || labelLower.includes("youtube") || labelLower.includes("google") || labelLower.includes("home") || labelLower.includes("wiki")) {
+        if (!labelLower.startsWith("open ") && !labelLower.startsWith("go to ")) {
+          actionLabel = `Open ${labelTrimmed}`;
+        }
+      }
+      if (suggestions.some((s) => s.label.toLowerCase() === actionLabel.toLowerCase())) {
+        continue;
+      }
       suggestions.push({
-        id: `sug-find-${btn.id}`,
-        label: `Find "${labelTrimmed}"`,
-        category: "find",
+        id: `sug-act-${item.id}`,
+        label: actionLabel,
+        category: "action",
         action: {
-          id: `act-find-${btn.id}`,
-          type: "highlight",
+          id: `act-click-${item.id}`,
+          type: "click",
           target: {
-            elementId: btn.id,
-            selector: btn.selector,
+            elementId: item.id,
+            selector: item.selector,
             label: labelTrimmed,
-            bounds: btn.bounds
+            bounds: item.bounds
           },
-          reason: `Locate and highlight "${labelTrimmed}" on page`,
+          reason: `Execute action: ${actionLabel}`,
           confidence: 0.95,
           risk: "low"
         },
-        icon: "target",
-        description: `Highlight ${labelTrimmed}`
+        icon: item.role === "link" ? "navigate" : "click",
+        description: actionLabel
       });
     }
     const formFields = elements.filter(
       (el) => el.visible && el.enabled && !el.sensitive && (el.role === "textbox" || el.role === "combobox" || el.tagName === "input" || el.tagName === "textarea") && el !== searchElement
     );
-    if (formFields.length > 0 && suggestions.length < 5) {
+    if (formFields.length > 0 && suggestions.length < 5 && !goalLower.includes("form")) {
       const firstField = formFields[0];
-      const fieldName = firstField.label || firstField.placeholder || "form field";
       suggestions.push({
         id: `sug-form-${firstField.id}`,
-        label: `Find form fields`,
+        label: "Fill form",
         category: "form",
         action: {
           id: `act-form-${firstField.id}`,
-          type: "highlight",
+          type: "focus",
           target: {
             elementId: firstField.id,
             selector: firstField.selector,
-            label: fieldName,
+            label: firstField.label || firstField.placeholder || "form input",
             bounds: firstField.bounds
           },
-          reason: `Highlight available form fields on this page`,
+          reason: "Focus available form field to fill",
           confidence: 0.9,
           risk: "low"
         },
         icon: "form",
-        description: "Locate form fields"
+        description: "Focus form fields"
       });
     }
     return suggestions.slice(0, 5);
@@ -5505,7 +5547,8 @@
                 redactedCount: state.lastRedactionManifest.length,
                 lastCapture: state.sessionId ? (/* @__PURE__ */ new Date()).toISOString() : void 0,
                 sessionActive: !!state.sessionId
-              }
+              },
+              redactionManifest: state.lastRedactionManifest
             });
             break;
           }
@@ -5525,8 +5568,14 @@
             const elements = state.pageMap ? state.pageMap.elements : extractSanitizedElements(document);
             const pageMap = state.pageMap || buildPageMap(elements);
             assignElementIds(elements);
-            const suggestions = generatePageSuggestions(pageMap);
-            sendResponse({ success: true, suggestions, pageMap, redactionCount: state.lastRedactionManifest.length });
+            const suggestions = generatePageSuggestions(pageMap, message.userGoal);
+            sendResponse({
+              success: true,
+              suggestions,
+              pageMap,
+              redactionCount: state.lastRedactionManifest.length,
+              redactionManifest: state.lastRedactionManifest
+            });
             break;
           }
           default:

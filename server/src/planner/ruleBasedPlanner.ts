@@ -48,6 +48,7 @@ function findElementByLabelOrRole(pageMap: PageMap, keywords: string[]): Sanitiz
       const ariaLower = el.ariaLabel?.toLowerCase() || "";
       const typeLower = el.inputType?.toLowerCase() || "";
       const selectorLower = el.selector?.toLowerCase() || "";
+      const hrefLower = el.href?.toLowerCase() || "";
       
       for (const kw of lowerKeywords) {
         const isRoleKeyword = roleKeywords.has(kw);
@@ -61,6 +62,7 @@ function findElementByLabelOrRole(pageMap: PageMap, keywords: string[]): Sanitiz
         if (nameLower.includes(kw)) { score += 45; kwMatched = true; }
         if (idLower.includes(kw)) { score += 45; kwMatched = true; }
         if (ariaLower.includes(kw)) { score += 45; kwMatched = true; }
+        if (hrefLower.includes(kw)) { score += 60; kwMatched = true; }
         if (typeLower.includes(kw)) { score += 20; kwMatched = true; }
         if (selectorLower.includes(kw)) { score += 10; kwMatched = true; }
         
@@ -419,14 +421,14 @@ function planForSubmit(
 ): { actions: ServerAction[]; summary: string; confidence: number; requiresConfirmation: boolean } {
   const submitBtn = findSubmitLikeElement(pageMap);
   if (submitBtn && !submitBtn.sensitive) {
-    const action = createAction("click", submitBtn, `Submit form via "${submitBtn.label}"`, 0.9, {
-      risk: "medium",
+    const action = createAction("click", submitBtn, `Click "${submitBtn.label}" to submit form`, 0.95, {
+      risk: "low",
     });
     return {
       actions: action ? [action] : [],
-      summary: `Will submit form via "${submitBtn.label}".`,
-      confidence: 0.9,
-      requiresConfirmation: true,
+      summary: `Will submit form by clicking "${submitBtn.label}".`,
+      confidence: 0.95,
+      requiresConfirmation: false,
     };
   }
 

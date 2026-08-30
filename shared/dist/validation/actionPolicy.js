@@ -57,17 +57,18 @@ export function validateAction(action, pageMapElements, pageOrigin) {
     else if (action.type !== "scroll" && action.type !== "wait") {
         return { action, policy: "reject", reason: "Action missing valid target", mappedElement: undefined };
     }
-    if (action.risk === "high") {
-        policy = "confirm";
-        reason = "High-risk action requires explicit user confirmation";
-    }
     if (action.type === "click" && mappedElement) {
         const destructiveRoles = ["button", "link"];
         const destructiveLabels = ["delete", "remove", "purchase", "buy", "pay", "transfer", "erase", "close account", "destroy", "wipe"];
-        if (destructiveRoles.includes(mappedElement.role) && destructiveLabels.some((l) => mappedElement.label.toLowerCase().includes(l))) {
+        const isDestructive = destructiveRoles.includes(mappedElement.role) && destructiveLabels.some((l) => mappedElement.label.toLowerCase().includes(l));
+        if (isDestructive) {
             policy = "confirm";
             reason = "Potentially destructive action requires confirmation";
         }
+    }
+    if (action.risk === "high") {
+        policy = "confirm";
+        reason = "High-risk action requires explicit user confirmation";
     }
     const confidence = action.confidence ?? 0;
     if (confidence < 0.85 && policy !== "reject") {

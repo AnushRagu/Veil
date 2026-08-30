@@ -7,14 +7,22 @@ const PORT = parseInt(process.env.PORT || "3001", 10);
 const HOST = process.env.HOST || "0.0.0.0";
 
 app.use(cors({
-  origin: [
-    "http://localhost:3002",
-    "http://127.0.0.1:3002",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-  ],
+  origin: (origin, callback) => {
+    // Allow extension requests, curl, server-to-server, localhost, and all web origins
+    if (!origin) return callback(null, true);
+    if (
+      origin.startsWith("chrome-extension://") ||
+      origin.startsWith("moz-extension://") ||
+      origin.includes("localhost") ||
+      origin.includes("127.0.0.1") ||
+      process.env.NODE_ENV !== "production"
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
   credentials: false,
-  methods: ["GET", "POST"],
+  methods: ["GET", "POST", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Session-ID"],
 }));
 
@@ -24,6 +32,10 @@ app.use(express.urlencoded({ extended: true, limit: "500kb" }));
 app.use("/api/agent", agentRouter);
 
 app.get("/health", (_req, res) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
