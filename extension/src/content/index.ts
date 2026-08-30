@@ -5,6 +5,7 @@ import {
   RedactionManifest,
   Bounds,
   ClientPayload,
+  generatePageSuggestions,
 } from "@privatesight/shared";
 import { sanitizeString, getOrigin, generateSessionId } from "../utils/helpers";
 
@@ -216,6 +217,31 @@ function applyRedactionsToCanvas(canvas: HTMLCanvasElement, manifest: RedactionM
   }
 }
 
+function findScrollableContainer(targetElement?: Element | null): HTMLElement | Window {
+  if (targetElement && targetElement instanceof HTMLElement) {
+    let current: HTMLElement | null = targetElement;
+    while (current && current !== document.body && current !== document.documentElement) {
+      const style = window.getComputedStyle(current);
+      const overflowY = style.overflowY;
+      const isScrollable = (overflowY === "auto" || overflowY === "scroll") && current.scrollHeight > current.clientHeight;
+      if (isScrollable) return current;
+      current = current.parentElement;
+    }
+  }
+
+  const modalScrollable = document.querySelector<HTMLElement>(
+    '[role="dialog"] [style*="overflow"], .modal [style*="overflow"], [class*="drawer"] [style*="overflow"], main [style*="overflow"], [data-scrollable="true"]'
+  );
+  if (modalScrollable && modalScrollable.scrollHeight > modalScrollable.clientHeight) {
+    const style = window.getComputedStyle(modalScrollable);
+    if (style.overflowY === "auto" || style.overflowY === "scroll") {
+      return modalScrollable;
+    }
+  }
+
+  return window;
+}
+
 function resolveTargetElement(target: any): Element | null {
   if (!target) return null;
 
@@ -265,7 +291,30 @@ function resolveTargetElement(target: any): Element | null {
 
   const searchText = (target.label || target.text || "").trim().toLowerCase();
 
-  // 6. aria-label
+  // 6. Accessible name / title attribute
+  if (searchText) {
+    const allButtonsAndLinks = Array.from(
+      document.querySelectorAll(
+        "button, a, input, textarea, select, [role='button'], [role='link'], [role='tab'], [role='menuitem']"
+      )
+    );
+    const byTitle = allButtonsAndLinks.find((el) => {
+      const title = (el.getAttribute("title") || "").trim().toLowerCase();
+      return title === searchText || (title.length > 0 && (title.includes(searchText) || searchText.includes(title)));
+    });
+    if (byTitle) return byTitle;
+
+    // SVG icon inside button / aria-label on SVG
+    const bySvgAria = allButtonsAndLinks.find((el) => {
+      const svg = el.querySelector("svg");
+      if (!svg) return false;
+      const svgAria = (svg.getAttribute("aria-label") || svg.querySelector("title")?.textContent || "").trim().toLowerCase();
+      return svgAria === searchText || (svgAria.length > 0 && (svgAria.includes(searchText) || searchText.includes(svgAria)));
+    });
+    if (bySvgAria) return bySvgAria;
+  }
+
+  // 7. aria-label / aria-labelledby
   if (searchText) {
     const interactiveElements = Array.from(
       document.querySelectorAll(
@@ -279,7 +328,7 @@ function resolveTargetElement(target: any): Element | null {
     if (byAria) return byAria;
   }
 
-  // 7. Associated label text
+  // 8. Associated label text
   if (searchText) {
     const labels = Array.from(document.querySelectorAll("label"));
     const matchedLabel = labels.find((lbl) => {
@@ -296,7 +345,7 @@ function resolveTargetElement(target: any): Element | null {
     }
   }
 
-  // 8. Visible text (button text / value / link text)
+  // 9. Visible text (button text / value / link text)
   if (searchText) {
     const clickables = Array.from(
       document.querySelectorAll(
@@ -310,7 +359,7 @@ function resolveTargetElement(target: any): Element | null {
     if (byVisibleText) return byVisibleText;
   }
 
-  // 9. Placeholder
+  // 10. Placeholder
   if (searchText) {
     const inputs = Array.from(document.querySelectorAll("input, textarea"));
     const byPlaceholder = inputs.find((el) => {
@@ -320,7 +369,7 @@ function resolveTargetElement(target: any): Element | null {
     if (byPlaceholder) return byPlaceholder;
   }
 
-  // 10. Name attribute
+  // 11. Name attribute
   if (searchText || target.elementId) {
     const nameToMatch = searchText || target.elementId!.toLowerCase();
     const byName = document.querySelector(`[name="${nameToMatch}"]`);
@@ -334,7 +383,7 @@ function resolveTargetElement(target: any): Element | null {
     if (byPartialName) return byPartialName;
   }
 
-  // 11. Role + visible text
+  // 12. Role + visible text
   if (searchText) {
     const withRoles = Array.from(document.querySelectorAll("[role]"));
     const byRoleText = withRoles.find((el) => {
@@ -344,7 +393,7 @@ function resolveTargetElement(target: any): Element | null {
     if (byRoleText) return byRoleText;
   }
 
-  // 12. Bounding-box coordinates as final fallback
+  // 13. Bounding-box coordinates as final fallback
   if (target.bounds && hasValidBounds(target.bounds)) {
     const bounds = target.bounds;
     const centerX = (bounds.x ?? 0) + (bounds.width ?? 0) / 2;
@@ -372,10 +421,9 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
   try {
     const { type, target, value, direction, amount } = action;
 
-    // 1. Scroll Action (Local & strictly verified without network dependencies)
+    // 1. Scroll Action (Local & strictly verified for window or nested containers)
     if (type === "scroll") {
-      const originalScroll = { x: window.scrollX, y: window.scrollY };
-      const scrollAmount = amount ?? 300;
+      const scrollAmount = amount ?? 400;
       let deltaX = 0;
       let deltaY = 0;
       if (direction === "down") deltaY = scrollAmount;
@@ -383,15 +431,39 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
       else if (direction === "right") deltaX = scrollAmount;
       else if (direction === "left") deltaX = -scrollAmount;
 
-      window.scrollBy({ top: deltaY, left: deltaX, behavior: "smooth" });
-      await new Promise((r) => setTimeout(r, 250));
+      const container = findScrollableContainer(target ? resolveTargetElement(target) : null);
+      let originalScroll = { x: 0, y: 0 };
+      let newScroll = { x: 0, y: 0 };
+      let isAtBottom = false;
+      let isAtTop = false;
+      let moved = false;
 
-      const newScroll = { x: window.scrollX, y: window.scrollY };
-      const scrollMaxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
-      const isAtBottom = direction === "down" && (window.scrollY >= scrollMaxY - 10 || scrollMaxY === 0);
-      const isAtTop = direction === "up" && window.scrollY <= 5;
-      const moved = newScroll.x !== originalScroll.x || newScroll.y !== originalScroll.y;
+      if (container instanceof HTMLElement) {
+        originalScroll = { x: container.scrollLeft, y: container.scrollTop };
+        container.scrollBy({ top: deltaY, left: deltaX, behavior: "smooth" });
+        await new Promise((r) => setTimeout(r, 200));
+        newScroll = { x: container.scrollLeft, y: container.scrollTop };
+        const maxScrollY = Math.max(0, container.scrollHeight - container.clientHeight);
+        isAtBottom = direction === "down" && (container.scrollTop >= maxScrollY - 10 || maxScrollY === 0);
+        isAtTop = direction === "up" && container.scrollTop <= 5;
+        moved = newScroll.x !== originalScroll.x || newScroll.y !== originalScroll.y;
+      } else {
+        originalScroll = { x: window.scrollX, y: window.scrollY };
+        window.scrollBy({ top: deltaY, left: deltaX, behavior: "smooth" });
+        await new Promise((r) => setTimeout(r, 200));
+        newScroll = { x: window.scrollX, y: window.scrollY };
+        const maxScrollY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        isAtBottom = direction === "down" && (window.scrollY >= maxScrollY - 10 || maxScrollY === 0);
+        isAtTop = direction === "up" && window.scrollY <= 5;
+        moved = newScroll.x !== originalScroll.x || newScroll.y !== originalScroll.y;
+      }
+
       const verified = moved || isAtBottom || isAtTop;
+      const message = isAtBottom
+        ? "Already at the bottom of the page."
+        : isAtTop
+        ? "Already at the top of the page."
+        : `Scrolled ${direction || "down"} successfully.`;
 
       return {
         success: true,
@@ -402,6 +474,7 @@ async function executeAction(action: any): Promise<{ success: boolean; error?: s
           moved,
           isAtBottom,
           isAtTop,
+          message,
         },
       };
     }
@@ -744,6 +817,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           state.lastScreenshot = null;
           state.lastRedactionManifest = [];
           sendResponse({ success: true });
+          break;
+        }
+
+        case "GET_PAGE_SUGGESTIONS": {
+          if (!state.pageMap) {
+            initialObserve();
+          }
+          const elements = state.pageMap ? state.pageMap.elements : extractSanitizedElements(document);
+          const pageMap = state.pageMap || buildPageMap(elements);
+          assignElementIds(elements);
+          const suggestions = generatePageSuggestions(pageMap);
+          sendResponse({ success: true, suggestions, pageMap, redactionCount: state.lastRedactionManifest.length });
           break;
         }
 

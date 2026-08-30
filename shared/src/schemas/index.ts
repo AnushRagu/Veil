@@ -373,3 +373,15 @@ export interface AgentExecutionContext {
   userGoal: string;
   isExecuting: boolean;
 }
+
+export type SuggestionCategory = "scroll" | "find" | "search" | "form" | "action";
+
+export interface PageSuggestion {
+  id: string;
+  label: string;
+  category: SuggestionCategory;
+  action: ServerAction;
+  icon?: string;
+  risk?: ActionRiskLevel;
+  description?: string;
+}

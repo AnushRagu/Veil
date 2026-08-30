@@ -18,6 +18,8 @@ import {
   SanitizedElement,
   PageMap,
   classifyGoal,
+  generatePageSuggestions,
+  PageSuggestion,
 } from "@privatesight/shared";
 
 interface ServerConfig {
@@ -892,6 +894,104 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
               },
             });
           }
+          break;
+        }
+
+        case "GET_PAGE_SUGGESTIONS": {
+          const activeTab = await getActiveTab();
+          if (!activeTab || !activeTab.id) {
+            sendResponse({ success: true, suggestions: generatePageSuggestions(null) });
+            break;
+          }
+          state.activeTabId = activeTab.id;
+          await ensureContentScript(activeTab.id);
+          const contentRes = await sendTabMessage(activeTab.id, { type: "GET_PAGE_SUGGESTIONS" });
+          if (contentRes.success && contentRes.suggestions) {
+            sendResponse({
+              success: true,
+              suggestions: contentRes.suggestions,
+              pageMap: contentRes.pageMap,
+              redactionCount: contentRes.redactionCount,
+            });
+          } else {
+            sendResponse({ success: true, suggestions: generatePageSuggestions(null) });
+          }
+          break;
+        }
+
+        case "EXECUTE_QUICK_ACTION": {
+          const action = message.action as ServerAction;
+          console.log(`[VEIL][BACKGROUND] executing quick action: ${action.type} (${action.reason || ""})`);
+          const activeTab = await getActiveTab();
+          if (!activeTab || !activeTab.id) {
+            sendResponse({ success: false, error: "No active tab found" });
+            break;
+          }
+          state.activeTabId = activeTab.id;
+          await ensureContentScript(activeTab.id);
+
+          const execRes = await sendTabMessage(activeTab.id, {
+            type: "EXECUTE_ACTIONS",
+            actions: [action],
+          });
+
+          const stepResult = execRes.results?.[0];
+          const isSuccess = execRes.success && (!stepResult || stepResult.success !== false);
+          const isVerified = stepResult?.verified ?? isSuccess;
+
+          const step: AgentStep = {
+            stepNumber: 1,
+            action,
+            result: isSuccess ? "success" : "failed",
+            error: stepResult?.error,
+            pageChanged: Boolean(stepResult?.details?.moved || stepResult?.details?.domChanged || stepResult?.details?.urlChanged),
+            timestamp: new Date().toISOString(),
+            verified: isVerified,
+            details: stepResult?.details,
+          };
+
+          const quickPlan: ServerPlan = {
+            summary: action.reason || `Quick action: ${action.type}`,
+            actions: [action],
+            requiresUserConfirmation: false,
+            confidence: 0.95,
+          };
+
+          const quickClassification: GoalClassification = {
+            mode: action.type === "highlight" ? "highlight" : action.type === "scroll" ? "scroll" : "click",
+            confidence: 0.95,
+            interpretation: action.reason || `Execute quick action: ${action.type}`,
+            requiresClarification: false,
+            riskLevel: "low",
+          };
+
+          state.agentExecution = {
+            sessionId: `sess-quick-${Date.now()}`,
+            userGoal: action.reason || action.type,
+            classification: quickClassification,
+            plan: quickPlan,
+            currentStep: 1,
+            maxSteps: 1,
+            steps: [step],
+            status: isSuccess ? "completed" : "failed",
+            lastPageMap: message.pageMap || null,
+            pageTracker: {
+              tabId: activeTab.id,
+              urlOrigin: activeTab.url ? new URL(activeTab.url).origin : "http://localhost",
+              title: activeTab.title || "",
+              observedAt: Date.now(),
+              elementCount: message.pageMap?.elements?.length || 0,
+            },
+            isExecuting: false,
+            visionBackend: "mock",
+          };
+
+          sendResponse({
+            success: isSuccess,
+            verified: isVerified,
+            results: execRes.results,
+            agentExecution: state.agentExecution,
+          });
           break;
         }
 
